@@ -1,0 +1,11 @@
+{
+  "contract": {
+    "task_id": "TASK-002",
+    "name": "Second Task",
+    "summary": "Second Task",
+    "status": "draft",
+    "created_at": "2026-06-08T00:37:17.771774585+02:00",
+    "updated_at": "2026-06-08T00:37:17.771774585+02:00",
+    "branch": "main"
+  }
+}
