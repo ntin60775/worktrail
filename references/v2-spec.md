@@ -52,6 +52,7 @@ worktrail v2 — универсальная knowledge-система задач 
 Статусы и переходы:
 ```
 draft → active → review → done
+active → done          (прямое закрытие без ревью — для простых задач)
 active → blocked → active
 любой → cancelled
 ```
@@ -120,8 +121,7 @@ active → blocked → active
 | Ref | Содержимое |
 |-----|-----------|
 | `refs/notes/worktrail` | Все записи: contract, progress, decision, spec, review_package, review_result |
-
-### Якорный коммит
+### Якорный коммит и тег задачи
 
 Каждая задача имеет **один якорный коммит** — это коммит, на который
 вешаются все git-notes задачи. Якорь вычисляется так:
@@ -132,9 +132,13 @@ active → blocked → active
    создан контракт
 3. Если контракт ещё не создан — якорь = HEAD
 
-Все notes для задачи (contract, decisions, specs, progress, review_package,
-review_result) висят на этом одном коммите. Это решает проблему поиска:
-`git notes --ref=worktrail show <anchor>` возвращает все записи задачи.
+На якорный коммит ставится лёгкий git-тег `worktrail/<task_id>`.
+Это даёт O(1) поиск задачи и O(задачи) перебор всех задач через
+`git tag -l 'worktrail/*'`. Тег создаётся при `contract init`
+и удаляется при `cancelled` (опционально — остаётся для истории).
+
+Все notes висят на якорном коммите: `git notes --ref=worktrail show <anchor>`
+возвращает агрегатный JSON со всеми записями задачи.
 
 **Обновление notes**: каждая новая запись перезаписывает note на якорном
 коммите, добавляя новую запись к уже существующим. Формат хранения —
@@ -213,12 +217,8 @@ worktrail context [--json]
 ```
 worktrail list [--status <s>] [--json]
 ```
-
-Без `--status` — все задачи. С `--status active` — только активные.
-С `--status review` — ожидающие ревью.
-
-**Логика**: сканирует все git-notes в `refs/notes/worktrail`, извлекает
-contract из каждого якорного коммита, фильтрует по статусу.
+**Логика**: `git tag -l 'worktrail/*'` → для каждого тега читает git-note
+на соответствующем коммите → извлекает contract → фильтрует по статусу.
 
 **JSON-выход**: массив сводок `[{task_id, name, status, branch, anchor_commit}]`.
 
@@ -230,10 +230,9 @@ contract из каждого якорного коммита, фильтрует
 worktrail contract init --task-id <id> --name "..." [--scope "..."] [--json]
 ```
 
-Создаёт якорный коммит (если ещё нет), записывает contract в git-note.
-Статус: `draft`. `created_at` = сейчас (UTC). `branch` = текущая ветка.
-
-### 4.4 `worktrail contract show`
+Создаёт якорный коммит (если ещё нет), ставит тег `worktrail/<task_id>`,
+записывает contract в git-note. Статус: `draft`. `created_at` = сейчас (UTC).
+`branch` = текущая ветка.
 
 Показывает контракт задачи.
 
@@ -325,9 +324,8 @@ worktrail verify log --task-id <id> [--last] [--run <n>] [--json]
 ### 4.13 `worktrail finalize`
 
 Собирает review_package и финализирует задачу.
-
 ```
-worktrail finalize [--task-id <id>] [--json]
+worktrail finalize [--task-id <id>] [--skip-review] [--json]
 ```
 
 **Что делает**:
@@ -336,8 +334,9 @@ worktrail finalize [--task-id <id>] [--json]
 3. Читает последний VRR из JSONL-лога
 4. Вычисляет `boundaries` (`git diff` от якорного коммита до HEAD)
 5. Формирует review_package → git-note
-6. Статус контракта → `review`
-7. `derive_time()` → добавляет время в контракт
+6. Если `--skip-review`: статус → `done`, review_package не обязателен
+7. Если без `--skip-review`: статус → `review`
+8. `derive_time()` → добавляет время в контракт
 
 ### 4.14 `worktrail review run`
 
@@ -349,6 +348,33 @@ worktrail review run --task-id <id> [--profile <profile>] [--json]
 
 Читает review_package → определяет профиль → возвращает массив заданий
 для параллельного запуска саб-агентов. **Не запускает экспертов сама.**
+
+**Формат задания** (один элемент массива `experts`):
+```json
+{
+  "expert": "code-auditor",
+  "task_id": "ERP-4521",
+  "profile": "code",
+  "prompt": "Проверь инварианты спеков в коде задачи ERP-4521...",
+  "artifacts": {
+    "contract": { ... },
+    "specs": [ { ... } ],
+    "boundaries": { "changed_files": ["src/payment/gateway.py", ...] },
+    "vrr_summary": { "total": 24, "passed": 24, "failed": 0 }
+  },
+  "expected_output": {
+    "verdict": "pass|fail",
+    "blockers": [ { "id": "B1", "title": "...", "problem": "...", "fix": "...", "location": "..." } ],
+    "warnings": [ { "id": "W1", "title": "...", "problem": "..." } ],
+    "details": [ { "criteria_id": "C1", "status": "covered", "evidence": "..." } ]
+  }
+}
+```
+
+`prompt` — инструкция на естественном языке, специфичная для эксперта и
+профиля. `artifacts` — релевантные данные из review_package (НЕ все —
+только те, что нужны этому эксперту). `expected_output` — схема,
+которую должен вернуть саб-агент.
 
 ### 4.15 `worktrail review result`
 
@@ -369,9 +395,13 @@ worktrail review result --task-id <id> --verdict <accepted|rejected> \
 ```
 worktrail time [--task-id <id>] [--json]
 ```
-
 Логика: `git log --after=<contract.created_at> --before=<now>` →
 суммирует время между коммитами. Промежуток > 4ч = граница сессии.
+
+**Ограничение**: эвристика даёт приблизительную оценку. Непрерывная работа
+> 4ч с коммитами каждый час будет разрезана на несколько «сессий». И наоборот —
+короткая правка с одним коммитом за 8ч покажет 0. Для точного учёта времени
+в будущем планируется дополнить анализом активности в IDE/файловой системе.
 
 ### 4.17 `worktrail report`
 
@@ -454,6 +484,29 @@ Worktrail ↔ git:
 - Worktrail читает/пишет git-notes напрямую
 - Worktrail читает git-лог для `derive_time()`
 - Worktrail НЕ делает commit'ы (это делает агент)
+
+### 5.4 Git-хуки
+
+Хуки устанавливаются глобально через `git config --global core.hooksPath`
+при `worktrail install`. Три хука:
+
+**`post-commit`** — автоматическая запись progress:
+1. Вызывает `worktrail context --json`
+2. Если `has_task: true` и `status` в `[active, review]`:
+   `worktrail progress record --task-id <id> --summary "<commit subject>" --commit <hash>`
+3. Если `has_task: false` или статус не активный — **молча пропускает** коммит.
+   Никаких ошибок, никаких предупреждений.
+
+**`post-checkout`** — обнаружение смены задачи:
+1. Вызывает `worktrail context --json`
+2. Если задача изменилась (другой `task_id` или `has_task` изменился) —
+   выводит сводку новой задачи в терминал
+3. Только информационный вывод. Не меняет состояние.
+
+**`prepare-commit-msg`** — подстановка task_id в шаблон коммита:
+1. Вызывает `worktrail context --json`
+2. Если `has_task: true` — добавляет `[<task_id>]` в начало commit-сообщения
+3. Если `has_task: false` — не модифицирует сообщение
 
 ## 6. Профили проекта
 
