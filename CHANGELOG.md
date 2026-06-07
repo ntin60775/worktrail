@@ -3,6 +3,10 @@
 ## [0.2.0] — Unreleased
 
 ### Added
+- **v2 Git hooks**: `prepare-commit-msg`, `post-commit`, `post-checkout` in `hooks/`
+  - `prepare-commit-msg` — prepends `[task_id]` to commit message from current context
+  - `post-commit` — auto-records progress with commit subject and hash (active/review tasks only)
+  - `post-checkout` — prints task summary on branch switch (informational only)
 - **Journal**: task knowledge base with 6 entry kinds (`proposal`, `design`, `spec`, `decision`, `note`, `artifact`)
   - `worktrail journal <id> --kind ...` — add entries
   - `worktrail journal list <id>` — list entries

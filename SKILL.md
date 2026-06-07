@@ -1,225 +1,280 @@
 ---
 name: worktrail
 description: >
-  Управление знаниями по задачам и учёт рабочего времени внутри git-репозитория.
-  Включает: трекинг времени, журнал знаний (proposal/design/spec/decision/note/artifact),
-  7 статусов задач, подзадачи, инициативы, исследования, архивацию, Markdown-экспорт.
-  Используй, когда в проекте есть директория .worktrail/ или когда
+  v2 — универсальная knowledge-система задач в git-репозитории.
+  Два режима: исполнение (context → contract → progress → decisions → verify → finalize)
+  и ревью (review run → параллельные эксперты → review result).
+  Данные в git-notes, установка одной командой, разработчик не оператор.
+  Используй, когда в репозитории есть refs/notes/worktrail или когда
   пользователь просит начать/закончить задачу, записать прогресс,
-  принять решение, зафиксировать спек, показать статус или отчёт.
+  принять решение, зафиксировать спек, запустить верификацию или ревью.
 ---
 
-# worktrail
+# worktrail v2
 
 ## Когда использовать
 
-- В репозитории есть `.worktrail/` (система управления знаниями и учёта времени)
+- В репозитории настроен worktrail (есть `refs/notes/worktrail` или `git tag -l 'worktrail/*'` непусто)
 - Пользователь просит: «начни задачу», «запиши что сделал», «сколько времени», «отчёт»
-- Пользователь просит: «запиши решение», «зафиксируй спек», «почему делаем», «покажи журнал задачи»
-- Пользователь просит инициализировать worktrail в новом проекте
+- Пользователь просит: «запиши решение», «зафиксируй спек», «проведи верификацию»
+- Пользователь просит: «проведи ревью», «проверь задачу»
+- Пользователь просит установить worktrail: «настрой учёт задач»
 
-## Быстрый старт
+## Установка
 
-```bash
-# Инициализация (если .worktrail/ отсутствует)
-worktrail init
-
-# Начало работы — явный ID задачи из внешней системы
-worktrail start ERP-4521 --name "Интеграция с бухгалтерией"
-worktrail start JIRA-12345 --name "Bug: падает авторизация"
-worktrail start ЗАКАЗ-2025-0042 --name "Доработка отчёта"
-
-# Фиксация прогресса (во время работы, несколько раз)
-worktrail checkpoint "Проектирование контракта API"
-worktrail checkpoint "Реализовал endpoint /pay"
-
-# Завершение
-worktrail stop
-
-# Текущий статус
-worktrail status
-
-# Отчёт
-worktrail report --today
-worktrail report --today --save   # сохранить в .worktrail/reports/
-```
+Одна глобальная установка:
 
 ```bash
-# === Управление знаниями ===
-
-# Записать решение в журнал задачи
-worktrail journal ERP-4521 --kind decision --title "Выбор протокола" --body "gRPC, потому что..."
-
-# Зафиксировать спек (инварианты)
-worktrail journal ERP-4521 --kind spec --title "API /pay" --body "ADDED: валидация суммы > 0"
-
-# Создать исследование (лёгкая задача без учёта времени)
-worktrail explore "Разобраться в API платёжного шлюза"
-
-# Сгруппировать задачи в инициативу
-worktrail initiative "Миграция на новую платёжную систему"
-
-# Экспортировать задачу с journal в Markdown
-worktrail report --task ERP-4521 --save
+worktrail install
 ```
 
-## Правила работы
+Устанавливает git-хуки глобально (`git config --global core.hooksPath`),
+копирует SKILL.md и agents.md.block. После установки worktrail доступен
+во всех репозиториях. Проверить: `worktrail doctor`.
 
-1. **Перед началом любой задачи** — `worktrail start <id> [--name "..."]`
-   - ID — любая строка: ERP-4521, JIRA-12345, ЗАКАЗ-0042, TASK-001
-   - Если задача уже существует — продолжаем её. Если нет — создаётся автоматически.
+## Режимы работы
 
-2. **После значимого результата** — `worktrail checkpoint "краткое описание"`
-   - Не на каждый коммит, а на смысловой блок работы
-   - 2-5 чекпоинтов на задачу — норма
+worktrail v2 работает в двух режимах. Режим определяется по первому сообщению
+пользователя в сессии. **Не смешивать:** если сессия началась как ревью —
+не писать код.
 
-3. **При завершении задачи** — `worktrail stop`
-   - Считает общее время, сохраняет в базу
+### Режим исполнения
 
-4. **Git hooks работают автоматически:**
-   - `git commit` → автоматический чекпоинт с сообщением коммита
-   - Переключение ветки task/TASK-xxx → автопредложение старта
-   - Переключение с task-ветки → автостоп
+Разработчик говорит ЧТО делать, агент делает и фиксирует знания.
+Агент — единственный оператор worktrail. Разработник не вызывает CLI вручную.
 
-5. **Если неоднозначно** — спроси пользователя:
-   - "Начать учёт времени для задачи X?"
-   - "Записать чекпоинт: что сделано?"
-   - "Создать исследование или полноценную задачу?"
+**Поток:** context → contract → progress → decisions → specs → verify → finalize
 
-6. **При архитектурном решении** — `worktrail journal <id> --kind decision ...`
-   - Обоснование выбора технологии, паттерна, подхода
-   - Одно решение = одна запись `decision`
+1. **`worktrail context --json`** — определить текущую задачу
+   - Извлекает `task_id` из ветки (`task/<id>*`, `feature/<id>*`, `jira/<id>*`)
+   - На `main`/`master` — ищет последнюю активную задачу
+   - Если `has_task: false` — предложить пользователю создать
+   - Если несколько задач — код выхода 2, уточнить у пользователя
 
-7. **При проектировании** — `worktrail journal <id> --kind design ...`
-   - Как устроено решение: компоненты, потоки данных, контракты
+2. **`worktrail contract init --task-id <id> --name "..."`** — создать контракт
+   - Если контракт существует — `contract update` для изменений
+   - Статус по умолчанию: `draft`
+   - Контракт содержит: `task_id`, `summary`, `success_criteria`, `verification`
 
-8. **При исследовании (разведка)** — `worktrail explore "<описание>"`
-   - Когда нужно разобраться в чём-то без полноценного учёта времени
-   - Можно закрыть без `worktrail stop`, добавив выводы в journal
+3. **`worktrail progress record --task-id <id> --summary "..."`** — фиксировать ход
+   - Git-хук `post-commit` делает это автоматически с сообщением коммита
+   - Для не-коммит-активности (чтение документации, анализ) — агент создаёт вручную
+   - Без `--commit` привязывается к HEAD
 
-9. **При группировке связанных задач** — `worktrail initiative "<название>"`
-   - Несколько задач ради одной цели = инициатива
-   - Подзадачи через `worktrail start <id> --parent <initiative-id>`
+4. **`worktrail decision record --task-id <id> --id <did> --title "..." --rationale "..."`**
+   - Каждое ключевое архитектурное решение — одна запись
+   - Обязательно: rationale (почему), alternatives (что рассматривали и почему нет)
+   - Опционально: `--file <path> --lines <range>` — привязка к коду
+   - Decisions иммутабельны. При ошибке создаётся новый decision со ссылкой на ошибочный
+
+5. **`worktrail spec record --task-id <id> --id <sid> --scope "..." --invariants "..."`**
+   - Инварианты модуля/API через `;`. Specs иммутабельны
+   - Опционально: `--file <path> --lines <range>`
+   - Отличие от criteria: criteria — «ЧТО должно быть истинно для завершения задачи»,
+     spec — «инварианты КОНКРЕТНОГО модуля/API», может пережить задачу
+
+6. **`worktrail verify run --method <method>`** — прогнать верификацию
+   - Методы: `pytest`, `shell`, `manual`, `none`
+   - Результат → VRR (Verification Run Record) → строка в JSONL-лог
+   - VRR содержит: пройдено/упало тестов, регрессии, исправления с прошлого прогона
+
+7. **`worktrail finalize [--skip-review]`** — завершить задачу
+   - Собирает review_package: контракт, decisions, specs, progress, VRR, `boundaries` (git diff)
+   - Без `--skip-review`: статус → `review`, задача ждёт ревью
+   - С `--skip-review`: статус → `done` (для простых задач)
+   - Вычисляет время через `derive_time()` из git-лога
+   - Пушит git-notes и теги: `git push origin refs/notes/worktrail refs/tags/worktrail/*`
+
+### Режим ревью
+
+Разработчик просит проверить задачу. Агент запускает панель экспертов параллельно.
+
+**Поток:** review run → параллельные эксперты → review result → отчёт
+
+1. **`worktrail review run --task-id <id> --json`** — получить задания для экспертов
+   - Возвращает массив заданий. Каждое задание содержит:
+     - `expert` — тип эксперта (code-auditor, contract-auditor, ...)
+     - `prompt` — инструкция на естественном языке
+     - `artifacts` — релевантные данные из review_package
+     - `expected_output` — схема ответа (verdict, blockers, warnings, details)
+
+2. **Запустить экспертов параллельно** — саб-агенты
+   - Каждый эксперт получает свой prompt и артефакты
+   - Эксперт возвращает: `verdict` (pass/fail), `blockers` (блокирующие замечания),
+     `warnings` (предупреждения), `details` (проверка criteria)
+
+3. **Собрать заключения** в review_result JSON
+   - Агрегирует вердикты всех экспертов
+   - Итоговый `verdict`: `accepted` (все pass) или `rejected` (хотя бы один fail)
+
+4. **`worktrail review result --task-id <id> --verdict <accepted|rejected> --file <result.json>`**
+   - Валидирует по схеме, записывает в git-note
+
+5. **Вывести итоговый отчёт** — вердикт, блокирующие замечания, предупреждения
+
+**Профили ревью** (выбираются автоматически по типу проекта):
+
+| Профиль | Эксперты | Когда |
+|---------|---------|-------|
+| `code` (по умолчанию) | contract-auditor, code-auditor, decisions-auditor, boundaries-auditor, vrr-auditor | Проекты с тестовыми фреймворками |
+| `1c` | contract-auditor, code-auditor, metadata-auditor, decisions-auditor, boundaries-auditor | Проекты на 1С:Предприятие |
+| `research` | contract-auditor, sources-auditor | Исследовательские проекты, статьи |
+| `generic` | contract-auditor | Fallback: личные заметки, черновики |
+
+При rejected ревью: `contract update --set status=active` — возврат на доработку.
+При accepted: задача готова к `finalize`.
 
 ## Что НЕ делать
 
-- Не выдумывай ID задач. Используй ID из внешней системы (Jira, 1С, ERP).
-- Не пиши чекпоинты на каждый коммит — git hook делает это автоматически.
-- Не создавай несколько активных сессий — система позволяет только одну.
-- Не модифицируй `.worktrail/runtime.db` напрямую — только через CLI.
-- Не дублируй чекпоинты в journal: чекпоинт = «что сделал», journal = «почему и как».
-- Не создавай инициативу для 1-2 мелких задач — группируй когда 3+ связанных задачи.
-- Не оставляй задачу в `draft`, если уже работаешь над ней — переведи в `active`.
+- **Не выдумывай ID задач.** Используй ID из внешней системы (Jira, 1С, ERP).
+- **Не работай без контракта.** Первое действие — `worktrail context --json`.
+- **Не смешивай режимы.** Если сессия началась как ревью — не пиши код.
+- **Не редактируй git-notes напрямую.** Только через CLI.
+- **Не пуши git-notes вручную.** Агент делает это при `finalize` и после `review result`.
+- **Не дублируй progress в decisions/specs.** Progress = «что сделал», decision = «почему и как», spec = «инварианты».
+- **Не запускай ревью без review_package.** Сначала `finalize` (без `--skip-review`), потом `review run`.
+- **Не игнорируй blockers при ревью.** Даже один blocker = rejected.
+- **Не завершай задачу в обход finalize.** Даже с `--skip-review` — через CLI.
+- **Не редактируй decisions и specs** — они иммутабельны. При ошибке создавай новый decision/spec.
+- **Не используй `worktrail init`** — в v2 только `worktrail install` (глобально).
 
 ## Команды
 
 | Команда | Назначение |
 |---------|-----------|
-| `worktrail init` | Создать `.worktrail/` в репозитории |
-| `worktrail start <id> [--name]` | Начать сессию для задачи |
-| `worktrail stop` | Завершить активную сессию |
-| `worktrail pause` | Ручная пауза |
-| `worktrail resume` | Продолжить после паузы |
-| `worktrail checkpoint "<msg>"` | Зафиксировать прогресс |
-| `worktrail status [<id> --set <s>]` | Текущая сессия / изменить статус |
-| `worktrail list [--status\|--kind\|--parent\|--archived]` | Список задач с фильтрами |
-| `worktrail report [--today\|--week\|--task\|--date]` | Отчёт |
-| `worktrail report --task <id> --save` | Markdown-экспорт задачи с journal |
-| `worktrail journal <id> --kind ...` | Добавить запись в журнал задачи |
-| `worktrail journal list <id>` | Список записей журнала |
-| `worktrail journal show <id> <entry>` | Показать запись журнала |
-| `worktrail archive <id> [--force]` | Архивировать задачу |
-| `worktrail explore "<desc>" [--parent]` | Создать исследование |
-| `worktrail initiative "<name>"` | Создать инициативу |
-| `worktrail initiative list` | Список инициатив |
-| `worktrail initiative show <id>` | Показать инициативу |
+| `worktrail install` | Глобальная установка (хуки, навык, managed-блок) |
+| `worktrail context [--json]` | Определить текущую задачу из git-контекста |
+| `worktrail list [--status <s>] [--json]` | Список задач в репозитории |
+| `worktrail contract init --task-id <id> --name "..." [--scope "..."]` | Создать контракт задачи |
+| `worktrail contract show [--task-id <id>] [--json]` | Показать контракт |
+| `worktrail contract update --task-id <id> [--set <k=v>] [--criteria-file <f>] [--verify-file <f>]` | Обновить контракт |
+| `worktrail progress record --task-id <id> --summary "..." [--commit <h>]` | Зафиксировать ход работы |
+| `worktrail progress list --task-id <id> [--last <n>]` | История хода работ |
+| `worktrail decision record --task-id <id> --id <did> --title "..." --rationale "..." [--file <p>] [--lines <r>]` | Записать решение |
+| `worktrail decision list --task-id <id>` | Список решений задачи |
+| `worktrail spec record --task-id <id> --id <sid> --scope "..." --invariants "..." [--file <p>]` | Зафиксировать спек |
+| `worktrail spec list --task-id <id>` | Список спеков задачи |
+| `worktrail verify run --method <m> [--task-id <id>] [--scope "..."]` | Запустить верификацию |
+| `worktrail verify log [--task-id <id>] [--last] [--run <n>]` | История прогонов |
+| `worktrail finalize [--task-id <id>] [--skip-review]` | Собрать review_package, финализировать |
+| `worktrail review run --task-id <id> [--profile <p>]` | Подготовить задания экспертов |
+| `worktrail review result --task-id <id> --verdict <accepted\|rejected> --file <f>` | Сохранить вердикт ревью |
+| `worktrail time [--task-id <id>]` | Вычислить время по git-логу |
+| `worktrail report [--task-id <id>] [--save]` | Markdown-отчёт |
+| `worktrail archive tck [--path <p>] [--task-id <id>]` | Просмотреть старую TCK-структуру (read-only) |
 | `worktrail doctor` | Диагностика |
 
+Все команды поддерживают `--json` для машиночитаемого вывода.
+Коды выхода: `0` = успех, `1` = ошибка, `2` = неоднозначность.
 
-## Статусы задач (7)
+## Статусы задач
 
-| Статус | Когда использовать |
-|--------|-------------------|
-| `draft` | Задача создана, работа не начата |
-| `active` | В работе (tracker запущен) |
+```
+draft → active → review → done
+active → done          (прямое закрытие без ревью)
+review → active        (возврат на доработку)
+active → blocked → active
+любой → cancelled
+```
+
+| Статус | Когда |
+|--------|-------|
+| `draft` | Контракт создан, работа не начата |
+| `active` | В работе |
 | `blocked` | Заблокирована внешней зависимостью |
-| `review` | Код/решение на ревью |
-| `done` | Завершена |
-| `archived` | В архиве |
+| `review` | На ревью (после finalize без --skip-review) |
+| `done` | Завершена (после accepted ревью или --skip-review) |
 | `cancelled` | Отменена |
 
-Изменение: `worktrail status TASK-001 --set review [--note "..."]`
+Изменение статуса: `worktrail contract update --task-id <id> --set status=<s>`
 
-## Журнал задачи
+## Данные: git-notes
 
-Типы записей (kind): `proposal`, `design`, `spec`, `decision`, `note`, `artifact`.
+Все структурные знания хранятся в git-notes `refs/notes/worktrail`.
+**SQLite больше не используется** (`.worktrail/runtime.db` не создаётся).
 
-**Когда использовать:**
-- `proposal` — почему делаем задачу
-- `design` — как будем делать, архитектурный подход
-- `spec` — инварианты (ADDED/MODIFIED/REMOVED)
-- `decision` — ключевое решение с обоснованием
-- `note` — свободная заметка, наблюдение
-- `artifact` — ссылка на файл/скриншот/лог
+| Тип записи | Описание | Иммутабелен |
+|-----------|----------|------------|
+| `contract` | Что делаем, критерии успеха, как проверять | Нет |
+| `progress` | Хроника хода работ (автоматически из коммитов + вручную) | Нет |
+| `decision` | Архитектурное решение с обоснованием и альтернативами | Да |
+| `spec` | Инварианты модуля/API | Да |
+| `review_package` | Пакет для ревью (собирается при finalize) | Да* |
+| `review_result` | Вердикт экспертной панели | Да* |
 
-**Правила:**
-- Journal — для знаний, не для времени
-- Не дублируй чекпоинты в journal
-- Одно ключевое решение = одна запись `decision`
+\* — перезаписывается при повторном finalize/review.
 
-## Инициативы и исследования
+Каждая задача имеет **якорный коммит** (первый коммит task-ветки или коммит создания контракта)
+и лёгкий тег `worktrail/<task_id>`. Все notes висят на якорном коммите.
+Поиск задач: `git tag -l 'worktrail/*'`.
 
-worktrail различает три вида (kind) задач:
+Оперативные VRR-логи — JSONL на диске (`<scope>/.worktrail/<task_id>/vrr.jsonl`).
+Итоговый VRR попадает в git-notes при finalize. JSONL-лог может быть удалён
+после завершения задачи.
 
-| Kind | Назначение | Учёт времени | Команда |
-|------|-----------|-------------|---------|
-| `task` | Обычная задача | Да | `worktrail start <id>` |
-| `exploration` | Разовое исследование | Нет (опционально) | `worktrail explore "<desc>"` |
-| `initiative` | Группировка задач | Нет | `worktrail initiative "<name>"` |
+## Git-хуки
 
-**Когда использовать `explore`:**
-- Нужно разобраться в новой технологии / API / кодовой базе
-- Результат — знания и выводы, а не код
-- Не хочется засорять список задач
-- Выводы фиксируются через `worktrail journal <id> --kind note ...`
+Устанавливаются глобально при `worktrail install` (через `git config --global core.hooksPath`).
 
-**Когда использовать `initiative`:**
-- Несколько задач (3+) объединены общей целью
-- Подзадачи создаются через `worktrail start <id> --parent <initiative-id>`
-- Прогресс инициативы: `worktrail initiative show <id>`
+| Хук | Действие |
+|-----|---------|
+| `post-commit` | Автоматический `progress record` с сообщением коммита. Только если `has_task: true` и статус `active`/`review`. Без задачи — молча пропускает |
+| `post-checkout` | Выводит сводку новой задачи при смене ветки. Информационный — не меняет состояние |
+| `prepare-commit-msg` | Добавляет `[<task_id>]` в начало commit-сообщения, если его ещё нет |
+
+Хуки НЕ стартуют и НЕ останавливают задачи — только информируют и автоматизируют progress.
+
+## Протокол взаимодействия
+
+- Агент вызывает CLI с `--json` → worktrail возвращает JSON на stdout
+- Ошибки — на stderr + код выхода
+- Worktrail читает/пишет git-notes напрямую, но **НЕ делает коммиты** — это делает агент
+- Агент пушит git-notes и теги при `finalize` и после `review result`:
+  ```bash
+  git push origin refs/notes/worktrail refs/tags/worktrail/*
+  ```
+
+## Профили проекта
+
+Профиль определяет состав экспертной панели при ревью. Всё остальное универсально.
+Агент определяет профиль автоматически по типу проекта. Разработчик может указать явно:
+«Проведи ревью по профилю code».
+
 ## Отчётность
 
 Отчёт выводится на русском, без git-жаргона:
 
 ```
-Отчёт за 29.05.2026
-═══════════════════
+Отчёт: ERP-4521 — Интеграция с бухгалтерией
+═══════════════════════════════════════════
 
-Задача ERP-4521: Интеграция с бухгалтерией
+Статус: в работе | Ветка: task/ERP-4521-grpc
+Время: 7.0ч (оценка по git-логу)
+
+Progress:
 ├── [2.5ч] Проектирование контракта и валидация входных данных
 ├── [3.0ч] Реализация endpoint'ов /pay и /refund
 └── [1.5ч] Обработка ошибок и retry-логика
-Итого: 7.0ч | Статус: в работе
 
-День: 7.0ч
+Decisions:
+├── D01: Выбор протокола — gRPC (стриминг, типизация)
+└── D02: БД — PostgreSQL (транзакции, триггеры)
+
+Specs:
+└── S01: API /pay — ADDED: amount > 0, currency is required
+
+VRR (последний прогон):
+Пройдено: 24/24 | Регрессий: 0 | Метод: pytest
 ```
 
-Экспорт одной задачи с journal (Markdown):
+Экспорт в Markdown: `worktrail report --task-id <id> --save`
 
-```bash
-worktrail report --task ERP-4521 --save
-# → .worktrail/reports/ERP-4521.md
-```
+## Старая TCK-структура (`knowledge/tasks/`)
 
-Структура экспорта: заголовок, метаданные (статус, ветка, даты, время), чекпоинты, journal по kind'ам.
+**Не мигрируется.** Просмотрщик `worktrail archive tck` читает старые `task.md`
+и `registry.md` в режиме read-only. Если агент обнаруживает `knowledge/`:
+читает как дополнительный источник исторического контекста, но все новые данные
+пишет в git-notes. Не модифицирует `knowledge/`.
 
-## Миграция
-
-Если в проекте есть старая система `knowledge/tasks/` (task-centric-knowledge v1):
-
-```bash
-worktrail migrate --from knowledge/
-```
-
-Создаёт ветку `worktrail/migrate-v1`, парсит старые task.md, удаляет `knowledge/`.
-Откат: `git revert <commit-migration>`.
+Worktrail v1 (`.worktrail/runtime.db`) — **не читается и не мигрируется**.
+Слишком разная модель данных.

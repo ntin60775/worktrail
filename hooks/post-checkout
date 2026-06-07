@@ -1,0 +1,23 @@
+#!/bin/sh
+# worktrail v2 post-checkout hook — show task info on branch switch
+# Invoked by git after checkout. $3 is 1 when a branch was switched.
+# Prints current task summary to the terminal. Never changes state.
+
+[ "$3" = "1" ] || exit 0
+
+ctx=$(worktrail context --json 2>/dev/null) || exit 0
+
+has_task=$(echo "$ctx" | sed -n 's/.*"has_task":\(true\|false\).*/\1/p')
+if [ "$has_task" = "true" ]; then
+    task_id=$(echo "$ctx" | sed -n 's/.*"task_id":"\([^"]*\)".*/\1/p')
+    name=$(echo "$ctx" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
+    status=$(echo "$ctx" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+    branch=$(echo "$ctx" | sed -n 's/.*"branch":"\([^"]*\)".*/\1/p')
+
+    printf '[worktrail] %s — %s [%s] (%s)\n' \
+        "$task_id" "$name" "$status" "$branch"
+else
+    printf '[worktrail] нет активной задачи\n'
+fi
+
+exit 0

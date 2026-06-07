@@ -1,0 +1,24 @@
+#!/bin/sh
+# worktrail v2 prepare-commit-msg hook — prepend [task_id] to commit message
+# Invoked by git before the commit message editor opens.
+# $1 is the path to the commit message file.
+# If a task is active, prepends [<task_id>] unless already present.
+
+msgfile="$1"
+
+ctx=$(worktrail context --json 2>/dev/null) || exit 0
+
+has_task=$(echo "$ctx" | sed -n 's/.*"has_task":\(true\|false\).*/\1/p')
+[ "$has_task" = "true" ] || exit 0
+
+task_id=$(echo "$ctx" | sed -n 's/.*"task_id":"\([^"]*\)".*/\1/p')
+[ -n "$task_id" ] || exit 0
+
+# Skip if [task_id] already present in the message
+grep -qF "[$task_id]" "$msgfile" 2>/dev/null && exit 0
+
+# Prepend [task_id] to the message file
+{ printf '[%s] ' "$task_id"; cat "$msgfile"; } >"$msgfile.tmp" && \
+    mv "$msgfile.tmp" "$msgfile"
+
+exit 0

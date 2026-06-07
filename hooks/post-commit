@@ -1,0 +1,27 @@
+#!/bin/sh
+# worktrail v2 post-commit hook — auto-record progress
+# Invoked by git after a successful commit.
+# If a task is active or under review, records a progress entry
+# with the commit subject and hash. Otherwise silently exits.
+
+ctx=$(worktrail context --json 2>/dev/null) || exit 0
+
+has_task=$(echo "$ctx" | sed -n 's/.*"has_task":\(true\|false\).*/\1/p')
+[ "$has_task" = "true" ] || exit 0
+
+status=$(echo "$ctx" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+case "$status" in active|review) ;; *) exit 0 ;; esac
+
+task_id=$(echo "$ctx" | sed -n 's/.*"task_id":"\([^"]*\)".*/\1/p')
+[ -n "$task_id" ] || exit 0
+
+commit_subject=$(git log -1 --format=%s HEAD)
+commit_hash=$(git rev-parse HEAD)
+
+worktrail progress record \
+    --task-id "$task_id" \
+    --summary "$commit_subject" \
+    --commit "$commit_hash" \
+    2>/dev/null || true
+
+exit 0

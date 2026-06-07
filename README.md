@@ -243,25 +243,34 @@ After this, any AI agent with skill support will:
 
 ## Git Hooks
 
-When you run `worktrail init`, two git hooks are installed:
+Three git hooks ship with worktrail v2, all using `worktrail context --json`
+to determine the current task:
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| `post-commit` | After `git commit` | Auto-checkpoint with commit message |
-| `post-checkout` | After `git checkout` | Suggest start/stop based on task branch |
+| `prepare-commit-msg` | Before commit editor | Prepends `[task_id]` to commit message |
+| `post-commit` | After `git commit` | Records progress with commit subject + hash |
+| `post-checkout` | After `git checkout` | Prints task summary on branch switch |
 
-Example — commit auto-checkpoint:
+Example — task_id prepend:
 
 ```bash
 git commit -m "Add payment validation"
-# [worktrail] ✓ Auto-checkpoint: Add payment validation
+# Commit message becomes: [ERP-4521] Add payment validation
 ```
 
-Example — branch switch auto-stop:
+Example — commit auto-progress:
 
 ```bash
-git checkout main
-# [worktrail] Авто-остановка сессии ERP-4521. Всего: 2ч 15м
+git commit -m "[ERP-4521] Fix validation edge case"
+# [worktrail] progress recorded: Fix validation edge case (abc1234)
+```
+
+Example — branch switch info:
+
+```bash
+git checkout task/ERP-4521-grpc
+# [worktrail] ERP-4521 — Интеграция с бухгалтерией [active] (task/ERP-4521-grpc)
 ```
 
 Disable hooks in `config.yaml`:
