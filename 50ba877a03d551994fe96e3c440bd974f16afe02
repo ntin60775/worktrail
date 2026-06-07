@@ -1,0 +1,11 @@
+{
+  "contract": {
+    "task_id": "ERP-4521",
+    "name": "ERP Integration",
+    "summary": "ERP Integration",
+    "status": "draft",
+    "created_at": "2026-06-08T00:37:17.438538316+02:00",
+    "updated_at": "2026-06-08T00:37:17.438538316+02:00",
+    "branch": "main"
+  }
+}
