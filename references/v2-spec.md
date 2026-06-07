@@ -10,8 +10,9 @@ worktrail v2 — универсальная knowledge-система задач 
 
 - **Разработчик не оператор.** Все операции с системой выполняет AI-агент.
   Разработчик только подтверждает или корректирует.
-- **Git — единственное хранилище.** Данные в git-notes, а не в SQLite или
-  файловой структуре.
+- **Git — каноническое хранилище структурных знаний.** Контракты, решения,
+  спеки, результаты ревью — в git-notes. Оперативные VRR-логи — JSONL
+  на диске с переносом итогового VRR в git-notes при finalize.
 - **Универсальное ядро, pluggable адаптеры.** Верификация, аннотации —
   через адаптеры под конкретный стек.
 - **Нулевая проектная установка.** Одна глобальная установка навыка.
@@ -35,9 +36,10 @@ worktrail v2 — универсальная knowledge-система задач 
 | Схема | Файл | Где хранится |
 |-------|------|-------------|
 | Contract | `contract.json` | git-note `refs/notes/worktrail` |
+| Progress | `progress.json` | git-note `refs/notes/worktrail` |
 | Decision | `decision.json` | git-note `refs/notes/worktrail` |
 | Spec | `spec.json` | git-note `refs/notes/worktrail` |
-| VRR | `vrr.json` | JSONL-лог + git-note (итоговый) |
+| VRR | `vrr.json` | JSONL-лог (оперативный) + git-note (итоговый) |
 | Review Package | `review_package.json` | git-note `refs/notes/worktrail` |
 | Review Result | `review_result.json` | git-note `refs/notes/worktrail` |
 
@@ -54,33 +56,58 @@ active → blocked → active
 любой → cancelled
 ```
 
-### 2.2 Decision (решение)
+### 2.2 Progress (запись о ходе работ)
+
+Лёгкая хронологическая запись. Не решение (нет rationale), не спек
+(нет инвариантов), не VRR (не прогон тестов). Просто «что произошло».
+
+Обязательные поля: `task_id`, `timestamp`, `summary`.
+Опционально: `commit` — хеш коммита, к которому относится запись.
+
+Создаётся автоматически хуком `post-commit` из commit-сообщения.
+Агент может создать вручную для не-коммит-активности
+(«2 часа читал документацию API»).
+
+### 2.3 Decision (решение)
 
 Фиксирует архитектурное или проектное решение. Обязательно: `id`, `task_id`,
 `title`, `rationale`, `created_at`. Опционально: `file` + `lines` для привязки
 к конкретному месту в проекте.
 
-### 2.3 Spec (спек)
+Отличие от Progress: Decision имеет rationale и alternatives. Это осознанный
+выбор, а не хроника.
+
+### 2.4 Spec (спек)
 
 Набор инвариантов, привязанных к scope или файлу. Обязательно: `id`, `task_id`,
 `scope`, `invariants` (минимум 1), `created_at`.
 
-### 2.4 VRR (Verification Run Record)
+Отличие от success_criteria в Contract:
+- Criteria — «ЧТО должно быть истинно для завершения задачи». Живут в контракте,
+  умирают с задачей.
+- Spec — «инварианты КОНКРЕТНОГО модуля/API». Может пережить задачу и остаться
+  в git-notes как документация модуля.
 
-Запись одного прогона верификации. Хранится в JSONL-файле в затронутой области
-задачи (путь относительно корня репозитория). После `finalize` итоговый VRR
-попадает в review_package.
+### 2.5 VRR (Verification Run Record)
+
+Запись одного прогона верификации.
+
+**Оперативное хранение**: JSONL-файл в `<scope>/.worktrail/<task_id>/vrr.jsonl`.
+Каждый прогон — одна строка JSON.
+
+**Каноническое хранение**: при `finalize` итоговый VRR копируется в git-note
+как часть review_package. JSONL-лог может быть удалён после завершения задачи.
 
 Обязательные поля: `run`, `method`, `timestamp`, `task_id`, `summary`.
 Поля `regressions` и `fixed_since_last` — вычисляемые дельты относительно
 предыдущего прогона.
 
-### 2.5 Review Package
+### 2.6 Review Package
 
 Собирается при `finalize`. Содержит всё для ревью: контракт, итоговый VRR,
-все decisions и specs, границы изменений.
+все decisions, specs, progress-записи, границы изменений.
 
-### 2.6 Review Result
+### 2.7 Review Result
 
 Вердикт команды экспертов. `verdict`: `accepted` или `rejected`. Массив
 `experts` — заключения по осям. Каждый эксперт: `pass`/`fail`, `blockers`,
@@ -92,34 +119,53 @@ active → blocked → active
 
 | Ref | Содержимое |
 |-----|-----------|
-| `refs/notes/worktrail` | Все записи: contract, decision, spec, review_package, review_result |
-| `refs/notes/worktrail-vrr` | Зарезервировано для будущих VRR (v1 не используется) |
+| `refs/notes/worktrail` | Все записи: contract, progress, decision, spec, review_package, review_result |
 
-### Формат аннотаций
+### Якорный коммит
 
-Каждая git-note — один JSON-объект, соответствующий одной из схем. Тип
-определяется по наличию обязательных полей (`task_id` + `summary` → contract,
-`rationale` → decision, и т.д.).
+Каждая задача имеет **один якорный коммит** — это коммит, на который
+вешаются все git-notes задачи. Якорь вычисляется так:
 
-Аннотация привязывается к коммиту, на котором она создана. При `finalize`
-review_package привязывается к HEAD коммиту задачи.
+1. Если задача на ветке `task/<id>*` — якорь = первый коммит этой ветки
+   (точка ветвления от base)
+2. Если задача без ветки (main, research) — якорь = коммит, на котором
+   создан контракт
+3. Если контракт ещё не создан — якорь = HEAD
+
+Все notes для задачи (contract, decisions, specs, progress, review_package,
+review_result) висят на этом одном коммите. Это решает проблему поиска:
+`git notes --ref=worktrail show <anchor>` возвращает все записи задачи.
+
+**Обновление notes**: каждая новая запись перезаписывает note на якорном
+коммите, добавляя новую запись к уже существующим. Формат хранения —
+JSON-объект с ключами-типами, содержащими массивы записей:
+
+```json
+{
+  "contract": { ... },
+  "decisions": [ { ... }, { ... } ],
+  "specs": [ { ... } ],
+  "progress": [ { ... }, { ... } ],
+  "review_package": { ... },
+  "review_result": { ... }
+}
+```
 
 ### Push/fetch
 
-Git-notes не пушатся автоматически. Используется хук `post-push` или агент
-явно выполняет:
+Git-notes не пушатся автоматически. Агент явно выполняет:
 
 ```bash
 git push origin refs/notes/worktrail
 ```
 
-Агент делает это при `finalize` и после `review run`.
+Агент делает это при `finalize` и после `review result`.
 
 ### Разрешение конфликтов
 
-При конфликте notes (два агента записали заметку на один коммит) —
-последняя запись перезаписывает предыдущую. Git-notes не поддерживает
-слияние; это приемлемо, так как в рамках одной задачи работает один агент.
+В рамках одной задачи работает один агент — конфликтов notes не возникает.
+При параллельной работе над разными задачами notes висят на разных коммитах —
+конфликтов нет.
 
 ## 4. CLI-контракт
 
@@ -139,8 +185,12 @@ git push origin refs/notes/worktrail
 worktrail context [--json]
 ```
 
-**Логика**: читает имя ветки → ищет task_id в формате `task/<id>` или
-`task/<id>-<slug>` → читает git-note contract для этого id → возвращает сводку.
+**Логика определения задачи** (в порядке приоритета):
+1. Ветка соответствует `task/<id>*` → извлечь id из имени
+2. Ветка соответствует `feature/<id>*`, `bugfix/<id>*`, `jira/<id>*` → извлечь id
+3. Найти git-note с `branch = текущая_ветка` на любом якорном коммите
+4. Если ветка `main`/`master` → найти последнюю активную задачу (status != done/cancelled)
+5. Ничего не найдено → `has_task: false`, агент предлагает создать
 
 **JSON-выход**:
 ```json
@@ -149,43 +199,41 @@ worktrail context [--json]
   "name": "Интеграция с бухгалтерией",
   "status": "active",
   "branch": "task/ERP-4521-grpc",
+  "anchor_commit": "abc1234",
   "contract": { ... },
-  "has_contract": true
+  "has_contract": true,
+  "has_task": true
 }
 ```
 
-Если контракт не найден: `has_contract: false`, `contract: null`.
+### 4.2 `worktrail list`
 
-**Текстовый выход**:
+Список задач в репозитории.
+
 ```
-Задача: ERP-4521 — Интеграция с бухгалтерией
-Статус: active
-Ветка:  task/ERP-4521-grpc
+worktrail list [--status <s>] [--json]
 ```
 
-**Ошибки**:
-- Не в git-репозитории → exit 1
-- Не на task-ветке → exit 1, подсказка
-- Несколько задач ссылаются на эту ветку → exit 2
+Без `--status` — все задачи. С `--status active` — только активные.
+С `--status review` — ожидающие ревью.
 
-### 4.2 `worktrail contract init`
+**Логика**: сканирует все git-notes в `refs/notes/worktrail`, извлекает
+contract из каждого якорного коммита, фильтрует по статусу.
 
-Создаёт контракт задачи и записывает в git-note.
+**JSON-выход**: массив сводок `[{task_id, name, status, branch, anchor_commit}]`.
+
+### 4.3 `worktrail contract init`
+
+Создаёт контракт задачи.
 
 ```
 worktrail contract init --task-id <id> --name "..." [--scope "..."] [--json]
 ```
 
-**Обязательные**: `--task-id`, `--name`.
-**Опциональные**: `--scope`.
+Создаёт якорный коммит (если ещё нет), записывает contract в git-note.
+Статус: `draft`. `created_at` = сейчас (UTC). `branch` = текущая ветка.
 
-Контракт создаётся в статусе `draft`. `created_at` = сейчас (UTC).
-`branch` = текущая git-ветка.
-
-**JSON-выход**: полный объект Contract.
-**Текстовый выход**: «✓ Контракт ERP-4521 создан (draft)»
-
-### 4.3 `worktrail contract show`
+### 4.4 `worktrail contract show`
 
 Показывает контракт задачи.
 
@@ -193,26 +241,26 @@ worktrail contract init --task-id <id> --name "..." [--scope "..."] [--json]
 worktrail contract show [--task-id <id>] [--json]
 ```
 
-Без `--task-id` — используется текущая задача из контекста.
+Без `--task-id` — текущая задача из контекста.
 
-### 4.4 `worktrail contract update`
+### 4.5 `worktrail contract update`
 
-Обновляет поля контракта.
-
-```
-worktrail contract update --task-id <id> --set <key=value> [--json]
-```
-
-Поддерживаемые ключи: `status`, `name`, `summary`, `scope`.
-Для добавления success_criteria и verification — отдельные подкоманды.
+Обновляет контракт.
 
 ```
-worktrail contract criteria add --task-id <id> --id <cid> --statement "..."
-worktrail contract criteria remove --task-id <id> --id <cid>
-worktrail contract verify add --task-id <id> --method <m> [--label "..."] [--scope "..."] [--maps-to "C1,C2"]
+worktrail contract update --task-id <id> [--set <key=value>] \
+    [--criteria-file <path>] [--verify-file <path>] [--json]
 ```
 
-### 4.5 `worktrail decision record`
+Поддерживаемые ключи `--set`: `status`, `name`, `summary`, `scope`.
+
+`--criteria-file <path>` — путь к JSON-файлу с массивом success_criteria.
+Заменяет весь массив criteria в контракте.
+
+`--verify-file <path>` — путь к JSON-файлу с массивом verification methods.
+Заменяет весь массив verification в контракте.
+
+### 4.6 `worktrail decision record`
 
 Записывает решение.
 
@@ -221,7 +269,7 @@ worktrail decision record --task-id <id> --id <did> --title "..." --rationale ".
     [--file <path>] [--lines <range>] [--alternatives "alt1; alt2 — почему нет"] [--json]
 ```
 
-### 4.6 `worktrail decision list`
+### 4.7 `worktrail decision list`
 
 Список решений задачи.
 
@@ -229,42 +277,52 @@ worktrail decision record --task-id <id> --id <did> --title "..." --rationale ".
 worktrail decision list --task-id <id> [--json]
 ```
 
-### 4.7 `worktrail spec record`
+### 4.8 `worktrail spec record`
 
 Фиксирует спек.
 
 ```
-worktrail spec record --task-id <id> --id <sid> --scope "..." --invariants "инв1; инв2; ..." \
-    [--file <path>] [--lines <range>] [--json]
+worktrail spec record --task-id <id> --id <sid> --scope "..." \
+    --invariants "инв1; инв2; ..." [--file <path>] [--lines <range>] [--json]
 ```
 
-### 4.8 `worktrail verify run`
+### 4.9 `worktrail progress record`
 
-Запускает верификацию указанным методом.
+Записывает отметку о ходе работ.
+
+```
+worktrail progress record --task-id <id> --summary "..." [--commit <hash>] [--json]
+```
+
+Без `--commit` — привязывается к HEAD.
+
+### 4.10 `worktrail progress list`
+
+Хронология хода работ по задаче.
+
+```
+worktrail progress list --task-id <id> [--last <n>] [--json]
+```
+
+### 4.11 `worktrail verify run`
+
+Запускает верификацию.
 
 ```
 worktrail verify run --method <method> [--task-id <id>] [--scope "..."] [--json]
 ```
 
-**Логика**: загружает адаптер для `method` → запускает → формирует VRR →
-дописывает строку в JSONL-лог → возвращает VRR.
+Загружает адаптер → запускает → формирует VRR → дописывает строку в JSONL-лог.
 
-Путь к JSONL-логу: `<scope>/.worktrail/<task_id>/vrr.jsonl`.
+### 4.12 `worktrail verify log`
 
-**JSON-выход**: полный объект VRR.
-
-### 4.9 `worktrail verify log`
-
-Просмотр истории прогонов.
+История прогонов.
 
 ```
 worktrail verify log --task-id <id> [--last] [--run <n>] [--json]
 ```
 
-`--last` — только последний прогон. `--run <n>` — конкретный прогон.
-Без флагов — сводка по всем прогонам.
-
-### 4.10 `worktrail finalize`
+### 4.13 `worktrail finalize`
 
 Собирает review_package и финализирует задачу.
 
@@ -273,66 +331,38 @@ worktrail finalize [--task-id <id>] [--json]
 ```
 
 **Что делает**:
-1. Читает контракт задачи
-2. Собирает все decisions и specs из git-notes
+1. Читает контракт
+2. Собирает все decisions, specs, progress из git-notes задачи
 3. Читает последний VRR из JSONL-лога
-4. Вычисляет `boundaries` (изменённые файлы через `git diff`)
-5. Формирует review_package
-6. Записывает в git-note на HEAD коммит
-7. Обновляет статус контракта → `review`
-8. Вычисляет время через `derive_time()` и добавляет в контракт
+4. Вычисляет `boundaries` (`git diff` от якорного коммита до HEAD)
+5. Формирует review_package → git-note
+6. Статус контракта → `review`
+7. `derive_time()` → добавляет время в контракт
 
-### 4.11 `worktrail review run`
+### 4.14 `worktrail review run`
 
-Запускает ревью (вызывается агентом-ревьюером).
+Подготавливает задания для экспертов.
 
 ```
 worktrail review run --task-id <id> [--profile <profile>] [--json]
 ```
 
-**Что делает**:
-1. Читает review_package из git-notes
-2. Определяет профиль → набор экспертов
-3. Для каждого эксперта формирует задание (контракт + релевантные артефакты)
-4. Возвращает структуру для параллельного запуска саб-агентов
+Читает review_package → определяет профиль → возвращает массив заданий
+для параллельного запуска саб-агентов. **Не запускает экспертов сама.**
 
-**Важно**: эта команда НЕ запускает экспертов сама. Она подготавливает
-задания. Фактический параллельный запуск делает агент через свой механизм
-саб-агентов. Команда возвращает массив экспертных заданий.
+### 4.15 `worktrail review result`
 
-**JSON-выход**:
-```json
-{
-  "task_id": "ERP-4521",
-  "profile": "generic",
-  "experts": [
-    {
-      "expert": "contract-auditor",
-      "prompt": "Проверь контракт задачи ERP-4521...",
-      "artifacts": ["contract", "vrr_log"]
-    }
-    // ...
-  ]
-}
-```
-
-`worktrail review collect` — собирает заключения экспертов в review_result:
-```
-worktrail review collect --task-id <id> --expert <name> --verdict pass|fail \
-    [--blockers-file <path>] [--warnings-file <path>] [--json]
-```
-
-### 4.12 `worktrail report`
-
-Генерирует Markdown-отчёт.
+Сохраняет вердикт ревью.
 
 ```
-worktrail report [--task-id <id>] [--save] [--json]
+worktrail review result --task-id <id> --verdict <accepted|rejected> \
+    --file <result.json> [--json]
 ```
 
-Без `--task-id` — отчёт по всем задачам. С `--save` — сохраняет в файл.
+Принимает готовый JSON в формате review_result (собранный агентом из
+заключений экспертов), валидирует по схеме, записывает в git-note.
 
-### 4.13 `worktrail time`
+### 4.16 `worktrail time`
 
 Вычисляет время по git-логу.
 
@@ -340,11 +370,20 @@ worktrail report [--task-id <id>] [--save] [--json]
 worktrail time [--task-id <id>] [--json]
 ```
 
-**Логика**: `git log --author=<current> --after=<contract.created_at> --before=<now>` →
-суммирует время между коммитами. Эвристика: промежуток > 4ч между коммитами
-считается границей сессии.
+Логика: `git log --after=<contract.created_at> --before=<now>` →
+суммирует время между коммитами. Промежуток > 4ч = граница сессии.
 
-### 4.14 `worktrail archive tck`
+### 4.17 `worktrail report`
+
+Генерирует Markdown-отчёт.
+
+```
+worktrail report [--task-id <id>] [--save] [--json]
+```
+
+Без `--task-id` — отчёт по всем задачам. С `--save` — в файл.
+
+### 4.18 `worktrail archive tck`
 
 Читает старую TCK-структуру `knowledge/tasks/`.
 
@@ -352,26 +391,15 @@ worktrail time [--task-id <id>] [--json]
 worktrail archive tck [--path <path>] [--task-id <id>] [--json]
 ```
 
-Без `--task-id` — список всех задач из `registry.md`. С `--task-id` —
-сводка по задаче из `task.md` + worklog.
+### 4.19 `worktrail install`
 
-### 4.15 `worktrail install`
-
-Устанавливает worktrail глобально.
+Глобальная установка.
 
 ```
 worktrail install [--dry-run] [--json]
 ```
 
-**Что делает**:
-1. Копирует skill.md → `~/.agents/skills/worktrail/SKILL.md`
-2. Устанавливает git-хуки: `git config --global core.hooksPath <path-to-hooks>`
-3. Прописывает managed-блок в `~/.agents/AGENTS.md` (или другой глобальный файл правил)
-4. Проверяет доступность команд
-
-`--dry-run` — показывает что будет сделано, не применяя.
-
-### 4.16 `worktrail doctor`
+### 4.20 `worktrail doctor`
 
 Диагностика.
 
@@ -379,14 +407,11 @@ worktrail install [--dry-run] [--json]
 worktrail doctor [--json]
 ```
 
-Проверяет: git, hooks, skill, доступность команд, целостность git-notes.
-
 ## 5. Интеграция с агентом
 
 ### 5.1 SKILL.md
 
-Навык описывает два режима: исполнение и ревью. Полный текст — в корне
-репозитория `skill.md`.
+Навык описывает два режима: исполнение и ревью. Полный текст — в `skill.md`.
 
 ### 5.2 Managed-блок для AGENTS.md
 
@@ -399,16 +424,18 @@ worktrail doctor [--json]
 Когда пользователь просит начать / сделать / продолжить задачу:
 1. `worktrail context --json` — определить текущую задачу
 2. Если контракта нет: `worktrail contract init ...` — создать
-3. В процессе: `worktrail decision record ...` — фиксировать решения
-4. После смыслового блока: `worktrail verify run ...` — прогонять проверки
-5. По завершении: `worktrail finalize` — собрать review_package
+3. В процессе: `worktrail progress record ...` — фиксировать ход
+4. Для важных выборов: `worktrail decision record ...`
+5. После смыслового блока: `worktrail verify run ...` — прогонять проверки
+6. По завершении: `worktrail finalize` — собрать review_package
 
 ### Режим ревью
 Когда пользователь просит провести ревью / проверить задачу:
 1. `worktrail review run --task-id <id>` — получить задания экспертов
 2. Запустить экспертов параллельно (саб-агенты)
-3. `worktrail review collect ...` — собрать вердикты
-4. Вывести итоговый отчёт
+3. Собрать заключения в review_result JSON
+4. `worktrail review result --task-id <id> --verdict <...> --file <result.json>`
+5. Вывести итоговый отчёт
 
 Режим определяется по первому сообщению пользователя в сессии.
 Не смешивать: если сессия началась как ревью — не писать код.
@@ -422,7 +449,6 @@ worktrail doctor [--json]
 - Агент вызывает CLI-команды с `--json`
 - Worktrail возвращает JSON на stdout
 - Ошибки — на stderr + код выхода
-- Агент не парсит текстовый вывод (кроме случаев когда `--json` недоступен)
 
 Worktrail ↔ git:
 - Worktrail читает/пишет git-notes напрямую
@@ -434,16 +460,17 @@ Worktrail ↔ git:
 Профиль определяет **состав экспертной панели при ревью**. Всё остальное —
 универсально.
 
-### 6.1 `generic` (по умолчанию)
+### 6.1 `code` (по умолчанию)
 
-Для Python, Rust, Go, JavaScript и других языков с тестовыми фреймворками.
+Для проектов разработки с тестовыми фреймворками: Python, Rust, Go,
+JavaScript, Java, C# и т.д.
 
 Эксперты:
-- `contract-auditor` — проверяет выполнение success_criteria по VRR
-- `code-auditor` — проверяет инварианты спеков в коде, отсутствие утечек абстракций
-- `decisions-auditor` — проверяет полноту rationale и альтернатив
-- `boundaries-auditor` — проверяет scope и отсутствие неожиданных изменений
-- `vrr-auditor` — проверяет честность VRR (нет подозрительных паттернов)
+- `contract-auditor` — выполнение success_criteria по VRR
+- `code-auditor` — инварианты спеков в коде, утечки абстракций
+- `decisions-auditor` — полнота rationale и альтернатив
+- `boundaries-auditor` — scope и неожиданные изменения
+- `vrr-auditor` — честность VRR
 
 ### 6.2 `1c`
 
@@ -454,23 +481,32 @@ Worktrail ↔ git:
 - `code-auditor` — инварианты в .bsl модулях, обработчики, права
 - `metadata-auditor` — реквизиты, формы, роли, подсистемы
 - `decisions-auditor` — rationale
-- `boundaries-auditor` — scope + проверка метаданных
+- `boundaries-auditor` — scope + метаданные
 
-### 6.3 `diary`
+### 6.3 `research`
 
-Для личных дневников и нетехнических проектов.
-
-Эксперты:
-- `contract-auditor` — success_criteria (обычно manual VRR)
-- `content-auditor` — связность, полнота, нет ли противоречий
-
-### 6.4 `research`
-
-Для исследовательских проектов.
+Для исследовательских проектов, статей, обзоров.
 
 Эксперты:
 - `contract-auditor` — success_criteria
-- `sources-auditor` — источники, ссылки, полнота покрытия темы
+- `sources-auditor` — источники, ссылки, полнота покрытия
+
+### 6.4 `minimal`
+
+Универсальный fallback. Используется когда ни один профиль не подходит,
+или когда проект не требует глубокого ревью (личные заметки, дневник,
+черновики).
+
+Эксперты:
+- `contract-auditor` — только проверка success_criteria
+
+### 6.5 Выбор профиля
+
+1. Агент определяет профиль по типу проекта (наличие кода, тестового
+   фреймворка, 1С-метаданных)
+2. Если профиль не удалось определить однозначно — используется `minimal`
+3. Агент может дополнить structured review ручной проверкой по другим осям
+4. Разработчик может явно указать профиль: «Проведи ревью по профилю code»
 
 ## 7. Миграция и архив
 
@@ -486,8 +522,7 @@ Worktrail ↔ git:
 
 ### 7.2 Worktrail v1 (`.worktrail/runtime.db`)
 
-**Не мигрируется и не читается.** Слишком разная модель данных (SQLite vs
-git-notes). Старые проекты начинают с чистого листа в git-notes.
+**Не мигрируется и не читается.** Слишком разная модель данных.
 
 ## 8. Реализация
 
@@ -506,6 +541,7 @@ worktrail/
 │   ├── v2-spec.md              ← эта спецификация
 │   └── schemas/                ← JSON Schema
 │       ├── contract.json
+│       ├── progress.json
 │       ├── decision.json
 │       ├── spec.json
 │       ├── vrr.json
@@ -515,10 +551,11 @@ worktrail/
 │   └── main.go
 ├── internal/
 │   ├── contract/               ← работа с контрактом
-│   ├── gitnotes/               ← read/write/list git-notes
+│   ├── gitnotes/               ← read/write/list + якорный коммит
 │   ├── time/                   ← derive_time
 │   ├── report/                 ← build_report
-│   ├── context/                ← resolve_context
+│   ├── context/                ← resolve_context (умный)
+│   ├── list/                   ← list tasks
 │   ├── verify/                 ← адаптеры верификации
 │   │   ├── adapter.go          ← интерфейс
 │   │   ├── pytest.go
@@ -526,14 +563,14 @@ worktrail/
 │   │   ├── shell.go
 │   │   └── none.go
 │   ├── executor/
-│   │   └── workflow.go         ← record_decision, finalize
+│   │   └── workflow.go         ← progress, decision, spec, finalize
 │   ├── reviewer/
-│   │   └── audit.go            ← review run/collect
+│   │   └── audit.go            ← review run/result
 │   └── archive/
 │       └── tck_reader.go
 ├── hooks/                      ← git-хуки (исходники Go)
 │   ├── prepare-commit-msg/
-│   ├── post-commit/
+│   ├── post-commit/            ← auto progress record
 │   └── post-checkout/
 ├── go.mod
 ├── go.sum
@@ -543,22 +580,23 @@ worktrail/
 ### Фазы реализации
 
 **Фаза 1: Ядро**
-- `internal/gitnotes/` — read/write/list
-- `internal/context/` — resolve_context
+- `internal/gitnotes/` — read/write/list, якорный коммит
+- `internal/context/` — resolve_context (ветка → задача)
+- `internal/list/` — list tasks
 - `internal/contract/` — CRUD контракта
 - `internal/time/` — derive_time
-- CLI: `context`, `contract init/show/update`, `time`
+- CLI: `context`, `list`, `contract init/show/update`, `time`
 
-**Фаза 2: Верификация**
+**Фаза 2: Верификация и ход работ**
 - `internal/verify/` — adapter interface + pytest, manual, shell, none
 - CLI: `verify run`, `verify log`
-- `internal/executor/workflow.go` — VRR-цикл, finalize
-- CLI: `finalize`
+- `internal/executor/workflow.go` — progress, decision, spec, finalize
+- CLI: `progress record/list`, `decision record/list`, `spec record`, `finalize`
 
 **Фаза 3: Ревью**
-- `internal/reviewer/audit.go` — review run/collect
-- CLI: `review run`, `review collect`
-- Профили: generic, 1c, diary, research
+- `internal/reviewer/audit.go` — review run/result
+- CLI: `review run`, `review result`
+- Профили: code, 1c, research, minimal
 
 **Фаза 4: Инфраструктура**
 - `internal/report/` — Markdown-отчёты

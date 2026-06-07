@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/progress.json",
+  "title": "Progress Record",
+  "description": "Лёгкая хронологическая запись о ходе работ. Не решение, не спек, не VRR — просто «что произошло». Создаётся автоматически хуком post-commit из commit-сообщения. Канонический источник: git-note refs/notes/worktrail.",
+  "type": "object",
+  "required": ["task_id", "timestamp", "summary"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "ID задачи, к которой относится запись"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: когда произошло событие"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Краткое описание: «Спроектировал контракт API /pay», «2 часа читал документацию»"
+    },
+    "commit": {
+      "type": "string",
+      "description": "Git commit hash, к которому относится запись. Заполняется автоматически хуком post-commit"
+    }
+  }
+}
