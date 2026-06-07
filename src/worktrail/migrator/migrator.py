@@ -516,23 +516,28 @@ class Migrator:
             except Exception as exc:
                 logger.debug("Failed to import plan for %s: %s", task_id, exc)
 
-        # task.md description section → proposal
+        # task.md sections → journal entries
         task_md_path = task_dir / "task.md"
         if task_md_path.is_file():
             try:
                 content = task_md_path.read_text(encoding="utf-8")
-                # Extract ## Описание section
-                m = re.search(r"## Описание\s*\n+(.*?)(?=\n## |\Z)", content, re.DOTALL)
-                if m:
-                    body = m.group(1).strip()
-                    if body and len(body) > 10:
-                        self._repo.add_journal_entry(
-                            task_id=task_id,
-                            kind="proposal",
-                            title="Описание задачи",
-                            body=body[:10000],
-                        )
-                        self._report.journal_entries_created += 1
+                # ## Цель or ## Описание → proposal
+                for section_re, kind, title in [
+                    (r"## Цель\s*\n+(.*?)(?=\n## |\Z)", "proposal", "Цель задачи"),
+                    (r"## Описание\s*\n+(.*?)(?=\n## |\Z)", "proposal", "Описание задачи"),
+                    (r"## Итог\s*\n+(.*?)(?=\n## |\Z)", "note", "Итог"),
+                ]:
+                    m = re.search(section_re, content, re.DOTALL)
+                    if m:
+                        body = m.group(1).strip()
+                        if body and len(body) > 10:
+                            self._repo.add_journal_entry(
+                                task_id=task_id,
+                                kind=kind,
+                                title=title,
+                                body=body[:10000],
+                            )
+                            self._report.journal_entries_created += 1
             except Exception as exc:
                 logger.debug("Failed to import task.md description for %s: %s", task_id, exc)
 
