@@ -26,8 +26,17 @@
 - Task `status` default changed from `active` to `draft`
 - `list` command shows kind column and supports new filters
 - `_translate_status` now uses Russian labels for all 7 statuses
+- **TrackerEngine.start()**: новые задачи сразу создаются в статусе `active`, существующие `draft`-задачи автоматически переводятся в `active` при старте сессии.
+- **cmd_start**: если `--name` не указан, имя задачи автоматически выводится из git-ветки:
+  - `task/TASK-001-fix-bug` → имя `"fix bug"`
+  - `feature/oauth2` → имя `"oauth2"`
+  - На `main`/`master` → fallback на `task_id`
+- **cmd_status --set**: вывод теперь включает имя задачи (если оно отличается от ID).
+- **initiative**: инициативы теперь создаются в статусе `active` (было `draft`).
 
 ### Fixed
+- Удалён тестовый мусор из базы (TASK-001, TASK-002)
+- OMP-001 и AUDIT-001 переведены из `draft` в `done`
 - Migration report now counts journal entries imported
 - `create_task` accepts `branch` from old task format during migration
 - Migrator: `tasks_migrated` counter now increments correctly (was always 0)

@@ -67,8 +67,11 @@ class TrackerEngine:
         """Start a new tracking session for *task_id*.
 
         - If another session is already active it is auto-stopped first.
-        - If *task_id* does not exist in the database it is created
-          (using *task_name* or *task_id* as the name).
+        - If *task_id* does not exist in the database it is created;
+          *task_name* is used as the human-readable name when provided,
+          otherwise *task_id* is used as a fallback.
+        - If the task exists and is in ``draft`` status, it is
+          automatically promoted to ``active``.
 
         Args:
             task_id: Unique task identifier.
@@ -87,7 +90,9 @@ class TrackerEngine:
         task = self._repo.get_task(task_id)
         if task is None:
             name = task_name or task_id
-            self._repo.create_task(task_id, name)
+            self._repo.create_task(task_id, name, status="active")
+        elif task.status == "draft":
+            self._repo.update_task_status(task_id, "active")
 
         session = self._repo.create_session(task_id)
         return session

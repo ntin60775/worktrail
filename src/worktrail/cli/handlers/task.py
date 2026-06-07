@@ -12,7 +12,10 @@ Provides:
 from __future__ import annotations
 
 import argparse
+import re
+import subprocess
 import sys
+from pathlib import Path
 
 from worktrail.cli.commands import (
     arg,
@@ -26,9 +29,52 @@ from worktrail.cli.commands import (
 from worktrail.core import Repository
 
 
+def _derive_task_name(project_root: Path, task_id: str) -> str | None:
+    """Try to derive a human-readable task name from the current git branch.
+
+    For task branches (``task/TASK-001-slug`` / ``du/DU-042-fix-bug``),
+    the slug after the task ID is extracted and hyphenated words are
+    joined with spaces.  For any other branch the full branch name is
+    used.  Returns ``None`` when git is unavailable.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        branch = result.stdout.strip()
+        if not branch or branch == "HEAD":
+            return None
+    except Exception:
+        return None
+
+
+    # Task branch: extract slug after task ID
+    pattern = r"^(?:task|du)/" + re.escape(task_id) + r"-(.+)$"
+    match = re.match(pattern, branch)
+    if match:
+        return match.group(1).replace("-", " ")
+
+    # Feature-like branches: strip prefix, use remainder as name
+    for prefix in ("task/", "du/", "feature/", "bugfix/", "fix/", "hotfix/"):
+        if branch.startswith(prefix):
+            return branch[len(prefix):].replace("-", " ")
+
+    # Mainline branches — fall back to task_id
+    if branch in ("main", "master", "develop", "HEAD"):
+        return None
+
+    # Other named branches — use as-is
+    return branch
+
+
 @command("start", help="Начать сессию для задачи")
 @arg("task_id", help="Идентификатор задачи (например, TASK-001)")
-@arg("--name", default=None, help="Название задачи")
+@arg("--name", default=None, help="Название задачи (если не указано — выводится из git-ветки)")
 def cmd_start(args: argparse.Namespace) -> int:
     """Handle ``worktrail start <task-id> [--name ...]``."""
     project_root = ensure_project_root()
@@ -37,8 +83,15 @@ def cmd_start(args: argparse.Namespace) -> int:
     task_id: str = args.task_id
     task_name: str | None = args.name
 
+    if task_name is None:
+        task_name = _derive_task_name(project_root, task_id)
+
     engine = get_engine(project_root)
-    engine.start(task_id, task_name)
+    try:
+        engine.start(task_id, task_name)
+    except ValueError as exc:
+        print(f"Ошибка: {exc}", file=sys.stderr)
+        return 1
 
     info = engine.current()
     elapsed_str = fmt_seconds(info["elapsed_seconds"]) if info else "0с"
@@ -148,8 +201,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"Ошибка: задача {args.task_id} не найдена", file=sys.stderr)
             return 1
         repo.update_task_status(args.task_id, args.set_status)
+        name_info = f' "{task.name}"' if task.name and task.name != task.id else ""
         note = f" ({args.note})" if args.note else ""
-        print(f"Статус задачи {args.task_id}: {task.status} → {args.set_status}{note}")
+        print(f"Статус задачи {args.task_id}{name_info}: {task.status} → {args.set_status}{note}")
         return 0
 
     engine = get_engine(project_root)

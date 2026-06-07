@@ -385,3 +385,53 @@ def test_get_activity_timestamp_empty_directory_returns_none(tmp_path: Path) -> 
     monitor = IdleMonitor(idle_timeout=1)
     ts = monitor.get_activity_timestamp(project_root)
     assert ts is None
+
+
+# ---------------------------------------------------------------------------
+# TrackerEngine — Task creation contract (name required, draft→active)
+# ---------------------------------------------------------------------------
+
+
+def test_start_falls_back_to_task_id_when_name_missing(
+    engine: TrackerEngine,
+) -> None:
+    """start() uses task_id as the task name when task_name is None or empty."""
+    engine.start("FALLBACK-001")
+    task = engine._repo.get_task("FALLBACK-001")
+    assert task is not None
+    assert task.name == "FALLBACK-001"
+    assert task.status == "active"
+
+    engine.start("FALLBACK-002", "")
+    task2 = engine._repo.get_task("FALLBACK-002")
+    assert task2 is not None
+    assert task2.name == "FALLBACK-002"
+    assert task2.status == "active"
+
+
+def test_start_auto_transitions_draft_to_active(engine: TrackerEngine) -> None:
+    """start() promotes a draft task to active when a session begins."""
+    # Create task manually in draft status
+    engine._repo.create_task("DRAFT-001", "Draft task", status="draft")
+    task_before = engine._repo.get_task("DRAFT-001")
+    assert task_before is not None
+    assert task_before.status == "draft"
+
+    # Start a session — should auto-promote
+    engine.start("DRAFT-001", "Draft task")
+
+    task_after = engine._repo.get_task("DRAFT-001")
+    assert task_after is not None
+    assert task_after.status == "active"
+
+
+def test_start_does_not_change_non_draft_status(engine: TrackerEngine) -> None:
+    """start() does not alter status for tasks that are not draft."""
+    # Create task in a non-draft status
+    engine._repo.create_task("REVIEW-001", "Review task", status="review")
+
+    engine.start("REVIEW-001", "Review task")
+
+    task = engine._repo.get_task("REVIEW-001")
+    assert task is not None
+    assert task.status == "review"  # unchanged

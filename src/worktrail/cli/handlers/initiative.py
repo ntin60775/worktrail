@@ -49,7 +49,7 @@ def cmd_initiative(args: argparse.Namespace) -> int:
         task_id=initiative_id,
         name=args.name,
         kind="initiative",
-        status="draft",
+        status="active",
     )
 
     print(f"Инициатива создана: {task.id} — {task.name}")
