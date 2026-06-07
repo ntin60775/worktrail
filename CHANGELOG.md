@@ -7,7 +7,7 @@
   - `worktrail journal <id> --kind ...` — add entries
   - `worktrail journal list <id>` — list entries
   - `worktrail journal show <id> <n>` — show entry
-- **8 task statuses** (was 4): `draft`, `active`, `blocked`, `review`, `delivery`, `done`, `archived`, `cancelled`
+- **7 task statuses** (was 4): `draft`, `active`, `blocked`, `review`, `done`, `archived`, `cancelled`
   - `worktrail status <id> --set <status>` — change task status
 - **Task kinds**: `task`, `exploration`, `initiative`
   - `worktrail explore "<desc>" [--parent]` — lightweight research tasks
@@ -25,8 +25,24 @@
 ### Changed
 - Task `status` default changed from `active` to `draft`
 - `list` command shows kind column and supports new filters
-- `_translate_status` now uses Russian labels for all 8 statuses
+- `_translate_status` now uses Russian labels for all 7 statuses
 
 ### Fixed
 - Migration report now counts journal entries imported
 - `create_task` accepts `branch` from old task format during migration
+- Migrator: `tasks_migrated` counter now increments correctly (was always 0)
+- Migrator: `journal_entries_created` now shown in `MigrationReport.__str__`
+- Migrator: backtick-wrapped values (`` `value` ``) from v1 passport tables now stripped
+- Migrator: status map extended with missing v1 statuses (`черновик→draft`, `на проверке→review`, `заблокирована→blocked`, `отменена→cancelled`)
+- Migrator: `"parent id"` (with space) now recognised alongside `"parent_id"`; empty markers (`—`, `-`, `нет`) treated as no parent
+- Migrator: `"краткое имя"` now recognised as task name key
+- Migrator: fallback status for unknown inputs changed from `active` to `draft`
+- Migrator: rejects invalid task IDs (non-`TASK-*` format) with clear error instead of creating garbage tasks
+- Migrator: `paused`/`on hold` v1 statuses now map to `blocked` (was `paused` — not in DB CHECK constraint)
+- Migrator: missing English identity mappings (`draft`, `blocked`, `review`) added to status map
+- Migrator: `_migrate_worklog`/`_migrate_journal` now wrapped in try/except — one task failure no longer crashes entire migration
+- Migrator: `_migrate_journal` exceptions now logged (were silently swallowed)
+- Reporter: `_translate_status` now covers all 7 statuses (was only 4)
+- Parser: `_extract_task_id_from_path` now captures full ID including subtask suffix
+- Parser: docstrings updated to reflect 7-status model
+- Removed `delivery` status (unused in practice; v1 never had it)
