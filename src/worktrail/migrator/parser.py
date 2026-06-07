@@ -223,51 +223,6 @@ def _parse_table(content: str) -> Dict[str, str]:
     return result
 
 
-def _parse_json_passport(content: str) -> Dict[str, Any]:
-    """Parse a v1 ``task.json`` passport file.
-
-    JSON keys are normalised to the same internal keys used by
-    ``_parse_table`` and ``_parse_frontmatter``.
-
-    Args:
-        content: Raw JSON text.
-
-    Returns:
-        Dictionary with normalised keys, or empty dict on parse error.
-    """
-    import json as _json
-    try:
-        data = _json.loads(content)
-    except (ValueError, _json.JSONDecodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    result: Dict[str, Any] = {}
-    # Normalise camelCase and space-separated keys to lower_underscore
-    for key, value in data.items():
-        if value is None:
-            continue
-        norm = key.strip().lower().replace(" ", "_")
-        # Map common JSON key names to internal keys
-        if norm in ("id", "task_id", "taskid"):
-            result["id"] = str(value)
-        elif norm in ("name", "title", "task_name"):
-            result["name"] = str(value)
-        elif norm in ("status", "state"):
-            result["status"] = str(value)
-        elif norm in ("parentid", "parent_id", "parent"):
-            result["parent_id"] = str(value)
-        elif norm in ("branch", "git_branch"):
-            result["branch"] = str(value)
-        elif norm in ("createdat", "created_at", "created"):
-            result["created_at"] = value
-        elif norm in ("updatedat", "updated_at", "updated"):
-            result["updated_at"] = value
-        else:
-            result[norm] = value
-    return result
-
-
 def _coerce_date(raw: Any) -> Optional[str]:
     """Convert various date representations to ISO8601 string.
 
@@ -371,36 +326,25 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
         FileNotFoundError: If *task_md_path* does not exist.
     """
     if not task_md_path.is_file():
-        # Try task.json in the same directory
-        json_path = task_md_path.parent / "task.json"
-        if json_path.is_file():
-            return _parse_v1_json_task(json_path)
         raise FileNotFoundError(f"Task file not found: {task_md_path}")
 
     content = task_md_path.read_text(encoding="utf-8")
-
     return _extract_task_fields(task_md_path, content)
 
 
-def _parse_v1_json_task(json_path: Path) -> Dict[str, Any]:
-    """Parse a v1 ``task.json`` file and return extracted metadata."""
-    content = json_path.read_text(encoding="utf-8")
-    raw_data = _parse_json_passport(content)
-    return _extract_task_fields(json_path, raw_data)
 
 
-def _extract_task_fields(source_path: Path, source: Any) -> Dict[str, Any]:
-    """Extract task fields from already-parsed raw data or markdown content."""
-    if isinstance(source, dict):
-        raw_data = source
-        content = ""
-    else:
-        content = str(source)
-        # 1. Try frontmatter
-        raw_data = _parse_frontmatter(content)
-        # 2. Fall back to table
-        if raw_data is None:
-            raw_data = _parse_table(content)
+
+def _extract_task_fields(source_path: Path, content: str) -> Dict[str, Any]:
+    """Extract task fields from markdown content.
+
+    First tries YAML frontmatter, then falls back to the first markdown table.
+    """
+    # 1. Try frontmatter
+    raw_data = _parse_frontmatter(content)
+    # 2. Fall back to table
+    if raw_data is None:
+        raw_data = _parse_table(content)
     result: Dict[str, Any] = {"raw": raw_data}
 
     # --- ID ---

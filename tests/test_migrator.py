@@ -23,7 +23,6 @@ from worktrail.migrator.parser import (
     _normalise_status,
     _parse_duration,
     _parse_frontmatter,
-    _parse_json_passport,
     _parse_table,
     _parse_worklog_narrative,
     _VALID_ID_RE,
@@ -1004,34 +1003,6 @@ class TestParentIdEmptyMarkers:
         assert result["parent_id"] == "TASK-000"
 
 
-class TestParseJsonPassport:
-    """Tests for _parse_json_passport — task.json parser."""
-
-    def test_basic_json(self) -> None:
-        """Basic JSON with standard keys."""
-        content = '{"id": "TASK-001", "name": "Test", "status": "done"}'
-        result = _parse_json_passport(content)
-        assert result["id"] == "TASK-001"
-        assert result["name"] == "Test"
-        assert result["status"] == "done"
-
-    def test_camelcase_keys(self) -> None:
-        """CamelCase keys are normalised."""
-        content = '{"taskId": "TASK-002", "parentId": "TASK-001", "createdAt": "2026-01-01"}'
-        result = _parse_json_passport(content)
-        assert result["id"] == "TASK-002"
-        assert result["parent_id"] == "TASK-001"
-        assert result["created_at"] == "2026-01-01"
-
-    def test_invalid_json(self) -> None:
-        """Invalid JSON returns empty dict."""
-        assert _parse_json_passport("{not json}") == {}
-        assert _parse_json_passport("") == {}
-
-    def test_non_dict_json(self) -> None:
-        """JSON array or scalar returns empty dict."""
-        assert _parse_json_passport("[1, 2, 3]") == {}
-        assert _parse_json_passport('"string"') == {}
 
 
 class TestParseWorklogNarrative:

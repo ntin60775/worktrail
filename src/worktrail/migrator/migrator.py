@@ -291,21 +291,14 @@ class Migrator:
             self._report.errors.append("Repository not available; skipping task migration.")
             return
 
-        # Find both task.md and task.json files
-        md_files = sorted(
+        # Find all task.md files (including subtasks)
+        task_files = sorted(
             p for p in self._tasks_dir.rglob("TASK-*/task.md")
             if "_templates" not in str(p)
         )
-        json_files = sorted(
-            p for p in self._tasks_dir.rglob("TASK-*/task.json")
-            if "_templates" not in str(p)
-            and not (p.parent / "task.md").exists()
-        )
-        all_files = md_files + json_files
-        logger.info("Found %d task files (%d md + %d json)",
-                     len(all_files), len(md_files), len(json_files))
+        logger.info("Found %d task.md files to migrate", len(task_files))
 
-        for task_file_path in all_files:
+        for task_file_path in task_files:
             try:
                 parsed = parse_v1_task(task_file_path)
             except Exception as exc:
