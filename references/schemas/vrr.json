@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/vrr.json",
+  "title": "Verification Run Record",
+  "description": "Запись одного прогона верификации. Хранится в JSONL-файле в затронутой области задачи. После finalize итоговый VRR попадает в review_package. Канонический источник: VRR JSONL-лог + итоговый VRR в git-note.",
+  "type": "object",
+  "required": ["run", "method", "timestamp", "task_id", "summary"],
+  "properties": {
+    "run": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Номер прогона, начиная с 1. Монотонно возрастает в рамках задачи"
+    },
+    "method": {
+      "type": "string",
+      "description": "Метод верификации: pytest, 1c_test, manual, shell, none"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: когда выполнен прогон"
+    },
+    "task_id": {
+      "type": "string",
+      "description": "ID задачи"
+    },
+    "commit": {
+      "type": "string",
+      "description": "Git commit hash, на котором выполнен прогон. Позволяет traceability"
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "passed", "failed"],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Общее число проверок"
+        },
+        "passed": {
+          "type": "integer",
+          "description": "Число пройденных проверок"
+        },
+        "failed": {
+          "type": "integer",
+          "description": "Число упавших проверок"
+        },
+        "skipped": {
+          "type": "integer",
+          "default": 0,
+          "description": "Число пропущенных проверок"
+        },
+        "duration_sec": {
+          "type": "number",
+          "description": "Длительность прогона в секундах"
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "description": "Упавшие проверки. Пустой массив при 100% прохождении",
+      "items": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "criteria_id": {
+            "type": "string",
+            "description": "ID критерия из контракта, который нарушен"
+          },
+          "check": {
+            "type": "string",
+            "description": "Идентификатор проверки: test_gateway.py::test_pay_positive"
+          },
+          "message": {
+            "type": "string",
+            "description": "Сообщение об ошибке"
+          },
+          "location": {
+            "type": "string",
+            "description": "Где ошибка: 'src/payment/gateway.py:47'"
+          },
+          "error_type": {
+            "type": "string",
+            "description": "Тип ошибки: AssertionError, ValueError, etc."
+          },
+          "first_seen_in_run": {
+            "type": "integer",
+            "description": "Номер прогона, в котором эта ошибка появилась впервые"
+          }
+        }
+      }
+    },
+    "regressions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Проверки, упавшие в этом прогоне, но проходившие в предыдущем. Критично!"
+    },
+    "fixed_since_last": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Проверки, исправленные с прошлого прогона"
+    }
+  }
+}

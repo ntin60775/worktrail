@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/contract.json",
+  "title": "Task Contract",
+  "description": "Контракт задачи — что делаем, границы, критерии успеха, методы верификации. Канонический источник: git-note refs/notes/worktrail.",
+  "type": "object",
+  "required": ["task_id", "summary", "created_at"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Любой внешний ID задачи: ERP-4521, JIRA-12345, ЗАКАЗ-0042, TASK-001"
+    },
+    "name": {
+      "type": "string",
+      "description": "Краткое имя задачи. Если не указано — выводится из git-ветки"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Человекочитаемое описание задачи: что делаем и зачем"
+    },
+    "scope": {
+      "type": "string",
+      "description": "Границы задачи — затронутые файлы, каталоги или модули"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "blocked", "review", "done", "cancelled"],
+      "default": "draft",
+      "description": "Статус задачи. Переходы: draft→active→review→done; active→blocked→active; любой→cancelled"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: когда создан контракт"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: последнее изменение контракта"
+    },
+    "branch": {
+      "type": "string",
+      "description": "Рабочая ветка задачи. По умолчанию — ветка, на которой создан контракт"
+    },
+    "success_criteria": {
+      "type": "array",
+      "description": "Критерии успеха — verifiable statements. То, что должно быть истинно для завершения задачи",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Уникальный ID критерия в рамках задачи: C1, C2, ..."
+          },
+          "statement": {
+            "type": "string",
+            "description": "Проверяемое утверждение: «Платёж с суммой > 0 проходит»"
+          },
+          "covered_by": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "ID проверок (тестов, шагов manual), покрывающих этот критерий. Заполняется агентом после прогона верификации"
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "array",
+      "description": "Методы верификации — как проверять критерии успеха",
+      "items": {
+        "type": "object",
+        "required": ["method"],
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "Имя адаптера: pytest, 1c_test, manual, shell, none"
+          },
+          "label": {
+            "type": "string",
+            "description": "Человекочитаемая метка: «Автотесты», «Ручная проверка в staging»"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Какие файлы/каталоги проверять. Для pytest — 'tests/', для 1c_test — путь к модулю"
+          },
+          "maps_to": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "ID критериев (C1, C2, ...), которые покрывает этот метод верификации"
+          }
+        }
+      }
+    }
+  }
+}

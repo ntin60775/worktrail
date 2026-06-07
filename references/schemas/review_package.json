@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/review_package.json",
+  "title": "Review Package",
+  "description": "Пакет для ревью — собирается агентом-исполнителем при finalize. Содержит всё необходимое ревьюеру для проверки задачи без повторного исследования кодовой базы. Канонический источник: git-note refs/notes/worktrail.",
+  "type": "object",
+  "required": ["task_id", "status", "contract", "verification_summary"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "ID задачи"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["review"],
+      "description": "Всегда 'review' — маркер, что задача готова к ревью"
+    },
+    "contract": {
+      "$ref": "contract.json",
+      "description": "Контракт задачи на момент finalize"
+    },
+    "verification_summary": {
+      "type": "object",
+      "required": ["total_runs", "final_run"],
+      "properties": {
+        "total_runs": {
+          "type": "integer",
+          "description": "Общее число прогонов верификации за задачу"
+        },
+        "final_run": {
+          "$ref": "vrr.json",
+          "description": "Последний (итоговый) VRR"
+        },
+        "vrr_log": {
+          "type": "string",
+          "description": "Путь к JSONL-файлу с полной историей прогонов, относительно корня репозитория"
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "decision.json" },
+      "description": "Все решения, принятые в рамках задачи"
+    },
+    "specs": {
+      "type": "array",
+      "items": { "$ref": "spec.json" },
+      "description": "Все спеки, зафиксированные в рамках задачи"
+    },
+    "boundaries": {
+      "type": "object",
+      "description": "Информация о границах изменений",
+      "properties": {
+        "changed_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Полный список изменённых файлов"
+        },
+        "untouched_by_contract": {
+          "type": "string",
+          "description": "Файлы/каталоги, которые контракт обязывал не трогать"
+        },
+        "dependencies_checked": {
+          "type": "string",
+          "description": "Вывод о новых зависимостях: 'none', или перечень"
+        }
+      }
+    }
+  }
+}

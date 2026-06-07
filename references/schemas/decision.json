@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/decision.json",
+  "title": "Decision Record",
+  "description": "Запись об архитектурном или проектном решении. Привязывается к задаче и опционально к файлу:строкам. Канонический источник: git-note refs/notes/worktrail.",
+  "type": "object",
+  "required": ["id", "task_id", "title", "rationale", "created_at"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Уникальный ID решения в рамках задачи: d1, d2, ..."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "ID задачи, к которой относится решение"
+    },
+    "title": {
+      "type": "string",
+      "description": "Краткое название решения: «Выбор gRPC», «Формат ошибок — RFC 7807»"
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Обоснование: почему выбрали этот вариант. Должно быть конкретным, не «потому что лучше»"
+    },
+    "alternatives": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Рассмотренные альтернативы с кратким объяснением, почему отклонены"
+    },
+    "file": {
+      "type": "string",
+      "description": "Файл, к которому относится решение. Путь относительно корня репозитория"
+    },
+    "lines": {
+      "type": "string",
+      "description": "Диапазон строк в файле: '1-20', '42' (одна строка)"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: когда решение принято"
+    }
+  }
+}

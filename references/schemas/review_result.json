@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/review_result.json",
+  "title": "Review Result",
+  "description": "Результат ревью — вердикт команды экспертов. Собирается агентом-ревьюером из параллельных заключений. Канонический источник: git-note refs/notes/worktrail.",
+  "type": "object",
+  "required": ["task_id", "verdict", "timestamp", "experts"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "ID задачи"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["accepted", "rejected"],
+      "description": "Итоговый вердикт. accepted — можно закрывать задачу, rejected — требуется доработка"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: когда ревью выполнено"
+    },
+    "experts": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Заключения экспертов. Состав определяется профилем проекта",
+      "items": {
+        "type": "object",
+        "required": ["expert", "verdict"],
+        "properties": {
+          "expert": {
+            "type": "string",
+            "description": "Имя эксперта: contract-auditor, code-auditor, decisions-auditor, boundaries-auditor, vrr-auditor, content-auditor, metadata-auditor"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["pass", "fail"],
+            "description": "pass — эксперт не нашёл проблем; fail — есть блокеры"
+          },
+          "blockers": {
+            "type": "array",
+            "description": "Критические проблемы, блокирующие приёмку",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "problem", "fix"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "ID блокера: B1, B2, ..."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Краткий заголовок"
+                },
+                "problem": {
+                  "type": "string",
+                  "description": "Описание проблемы: что не так"
+                },
+                "fix": {
+                  "type": "string",
+                  "description": "Рекомендация по исправлению"
+                },
+                "location": {
+                  "type": "string",
+                  "description": "Где проблема: 'src/payment/gateway.py:70-75'"
+                },
+                "spec_id": {
+                  "type": "string",
+                  "description": "ID спека, который нарушен"
+                },
+                "criteria_id": {
+                  "type": "string",
+                  "description": "ID критерия, который не выполнен"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "Некритические замечания. Не блокируют приёмку, но требуют внимания",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "problem"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "ID предупреждения: W1, W2, ..."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Краткий заголовок"
+                },
+                "problem": {
+                  "type": "string",
+                  "description": "Описание замечания"
+                }
+              }
+            }
+          },
+          "details": {
+            "type": "array",
+            "description": "Детальный отчёт: проверка каждого критерия/инварианта",
+            "items": {
+              "type": "object",
+              "properties": {
+                "criteria_id": {
+                  "type": "string",
+                  "description": "ID критерия из контракта"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "covered, not_covered, violated"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "Что доказывает статус: ссылка на тест, VRR, ручную проверку"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "report": {
+      "type": "string",
+      "description": "Путь к Markdown-отчёту ревью"
+    }
+  }
+}

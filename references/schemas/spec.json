@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://worktrail.dev/schemas/spec.json",
+  "title": "Specification Record",
+  "description": "Спек (спецификация) — набор инвариантов, привязанных к scope или файлу. Канонический источник: git-note refs/notes/worktrail.",
+  "type": "object",
+  "required": ["id", "task_id", "scope", "invariants", "created_at"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Уникальный ID спека в рамках задачи: s1, s2, ..."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "ID задачи, к которой относится спек"
+    },
+    "scope": {
+      "type": "string",
+      "description": "Что описывает спек: 'API /pay', 'Документ.Платёж', 'Модуль авторизации'"
+    },
+    "invariants": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Список инвариантов — утверждений, которые всегда должны быть истинны",
+      "minItems": 1
+    },
+    "file": {
+      "type": "string",
+      "description": "Файл, к которому относится спек"
+    },
+    "lines": {
+      "type": "string",
+      "description": "Диапазон строк: '1-100'"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC: когда спек зафиксирован"
+    }
+  }
+}
