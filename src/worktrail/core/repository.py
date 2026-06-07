@@ -262,6 +262,19 @@ class Repository:
             The newly created :class:`JournalEntry`.
         """
         now = self._now()
+        # Check for duplicate (idempotent migration re-run)
+        with self.conn() as conn:
+            cur = conn.execute(
+                "SELECT id FROM journal WHERE task_id=? AND kind=? AND title=?",
+                (task_id, kind, title),
+            )
+            existing = cur.fetchone()
+            if existing is not None:
+                entry = JournalEntry(
+                    task_id=task_id, kind=kind, title=title, body=body,
+                    created_at=now, id=existing[0],
+                )
+                return entry
         entry = JournalEntry(
             task_id=task_id,
             kind=kind,
