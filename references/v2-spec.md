@@ -79,6 +79,9 @@ active → blocked → active
 Отличие от Progress: Decision имеет rationale и alternatives. Это осознанный
 выбор, а не хроника.
 
+Decisions и Specs иммутабельны — не удаляются и не редактируются.
+При ошибке создаётся новый Decision/Spec, ссылающийся на ошибочный.
+
 ### 2.4 Spec (спек)
 
 Набор инвариантов, привязанных к scope или файлу. Обязательно: `id`, `task_id`,
@@ -319,6 +322,7 @@ worktrail progress record --task-id <id> --summary "..." [--commit <hash>] [--js
 ```
 
 Без `--commit` — привязывается к HEAD.
+
 ### 4.11 `worktrail progress list`
 
 Хронология хода работ по задаче.
@@ -336,18 +340,23 @@ worktrail verify run --method <method> [--task-id <id>] [--scope "..."] [--json]
 ```
 
 Загружает адаптер → запускает → формирует VRR → дописывает строку в JSONL-лог.
+Без `--task-id` — текущая задача из контекста.
 
 ### 4.13 `worktrail verify log`
 
 История прогонов.
 
 ```
-worktrail verify log --task-id <id> [--last] [--run <n>] [--json]
+worktrail verify log [--task-id <id>] [--last] [--run <n>] [--json]
 ```
+
+Без `--task-id` — текущая задача из контекста.
 
 ### 4.14 `worktrail finalize`
 
 Собирает review_package и финализирует задачу.
+
+Без `--task-id` — текущая задача из контекста.
 
 ```
 worktrail finalize [--task-id <id>] [--skip-review] [--json]
@@ -420,6 +429,8 @@ worktrail review result --task-id <id> --verdict <accepted|rejected> \
 ```
 worktrail time [--task-id <id>] [--json]
 ```
+
+Без `--task-id` — текущая задача из контекста.
 Логика: `git log --after=<contract.created_at> --before=<now>` →
 суммирует время между коммитами. Промежуток > 4ч = граница сессии.
 
@@ -530,8 +541,9 @@ Worktrail ↔ git:
 
 **`prepare-commit-msg`** — подстановка task_id в шаблон коммита:
 1. Вызывает `worktrail context --json`
-2. Если `has_task: true` — добавляет `[<task_id>]` в начало commit-сообщения
-3. Если `has_task: false` — не модифицирует сообщение
+2. Если `has_task: true` и сообщение ещё не содержит `[<task_id>]` —
+   добавляет `[<task_id>]` в начало commit-сообщения
+3. Если `has_task: false` или `[<task_id>]` уже есть — не модифицирует
 
 ## 6. Профили проекта
 
