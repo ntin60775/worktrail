@@ -42,6 +42,7 @@
 - Migrator: missing English identity mappings (`draft`, `blocked`, `review`) added to status map
 - Migrator: `_migrate_worklog`/`_migrate_journal` now wrapped in try/except — one task failure no longer crashes entire migration
 - Migrator: `_migrate_journal` exceptions now logged (were silently swallowed)
+- Migrator: `## Цель` and `## Итог` sections from task.md now imported as journal entries (previously only `## Описание` was searched — v1 files use `## Цель`)
 - Reporter: `_translate_status` now covers all 7 statuses (was only 4)
 - Parser: `_extract_task_id_from_path` now captures full ID including subtask suffix
 - Parser: docstrings updated to reflect 7-status model
