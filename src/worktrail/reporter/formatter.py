@@ -169,10 +169,13 @@ def _group_checkpoints(
 def _translate_status(status: str) -> str:
     """Translate a task status code into a human-readable Russian string."""
     mapping = {
+        "draft": "черновик",
         "active": "в работе",
+        "blocked": "заблокирована",
+        "review": "на проверке",
         "done": "завершена",
-        "paused": "на паузе",
         "archived": "в архиве",
+        "cancelled": "отменена",
     }
     return mapping.get(status, status)
 
