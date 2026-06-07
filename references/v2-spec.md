@@ -137,6 +137,12 @@ active → blocked → active
 `git tag -l 'worktrail/*'`. Тег создаётся при `contract init`
 и удаляется при `cancelled` (опционально — остаётся для истории).
 
+**Ограничение**: task_id должен быть безопасен для git-тегов.
+ASCII буквы, цифры, дефис, подчёркивание, точка. Не-ASCII символы
+(кириллица, пробелы, спецсимволы) санируются: при создании тега
+система заменяет неподдерживаемые символы на дефис. Контракт хранит
+оригинальный task_id без изменений.
+
 Все notes висят на якорном коммите: `git notes --ref=worktrail show <anchor>`
 возвращает агрегатный JSON со всеми записями задачи.
 
@@ -161,9 +167,11 @@ Git-notes не пушатся автоматически. Агент явно в
 
 ```bash
 git push origin refs/notes/worktrail
+git push origin refs/tags/worktrail/*
 ```
 
 Агент делает это при `finalize` и после `review result`.
+Теги пушатся вместе с notes, чтобы `list` работал на других клонах.
 
 ### Разрешение конфликтов
 
@@ -192,7 +200,8 @@ worktrail context [--json]
 **Логика определения задачи** (в порядке приоритета):
 1. Ветка соответствует `task/<id>*` → извлечь id из имени
 2. Ветка соответствует `feature/<id>*`, `bugfix/<id>*`, `jira/<id>*` → извлечь id
-3. Найти git-note с `branch = текущая_ветка` на любом якорном коммите
+3. Найти git-note с `branch = текущая_ветка` на любом якорном коммите.
+   Если найдено несколько — exit 2 (неоднозначность: несколько задач на ветке)
 4. Если ветка `main`/`master` → найти последнюю активную задачу (status != done/cancelled)
 5. Ничего не найдено → `has_task: false`, агент предлагает создать
 
@@ -233,6 +242,11 @@ worktrail contract init --task-id <id> --name "..." [--scope "..."] [--json]
 Создаёт якорный коммит (если ещё нет), ставит тег `worktrail/<task_id>`,
 записывает contract в git-note. Статус: `draft`. `created_at` = сейчас (UTC).
 `branch` = текущая ветка.
+
+Если контракт для этого `task_id` уже существует — ошибка (exit 1).
+Для обновления существующего контракта используй `contract update`.
+
+### 4.4 `worktrail contract show`
 
 Показывает контракт задачи.
 
@@ -285,7 +299,15 @@ worktrail spec record --task-id <id> --id <sid> --scope "..." \
     --invariants "инв1; инв2; ..." [--file <path>] [--lines <range>] [--json]
 ```
 
-### 4.9 `worktrail progress record`
+### 4.9 `worktrail spec list`
+
+Список спеков задачи.
+
+```
+worktrail spec list --task-id <id> [--json]
+```
+
+### 4.10 `worktrail progress record`
 
 Записывает отметку о ходе работ.
 
@@ -295,15 +317,14 @@ worktrail progress record --task-id <id> --summary "..." [--commit <hash>] [--js
 
 Без `--commit` — привязывается к HEAD.
 
-### 4.10 `worktrail progress list`
-
+### 4.11 `worktrail progress list`
 Хронология хода работ по задаче.
 
 ```
 worktrail progress list --task-id <id> [--last <n>] [--json]
 ```
 
-### 4.11 `worktrail verify run`
+### 4.12 `worktrail verify run`
 
 Запускает верификацию.
 
@@ -313,7 +334,7 @@ worktrail verify run --method <method> [--task-id <id>] [--scope "..."] [--json]
 
 Загружает адаптер → запускает → формирует VRR → дописывает строку в JSONL-лог.
 
-### 4.12 `worktrail verify log`
+### 4.13 `worktrail verify log`
 
 История прогонов.
 
@@ -321,9 +342,10 @@ worktrail verify run --method <method> [--task-id <id>] [--scope "..."] [--json]
 worktrail verify log --task-id <id> [--last] [--run <n>] [--json]
 ```
 
-### 4.13 `worktrail finalize`
+### 4.14 `worktrail finalize`
 
 Собирает review_package и финализирует задачу.
+
 ```
 worktrail finalize [--task-id <id>] [--skip-review] [--json]
 ```
@@ -338,7 +360,7 @@ worktrail finalize [--task-id <id>] [--skip-review] [--json]
 7. Если без `--skip-review`: статус → `review`
 8. `derive_time()` → добавляет время в контракт
 
-### 4.14 `worktrail review run`
+### 4.15 `worktrail review run`
 
 Подготавливает задания для экспертов.
 
@@ -376,7 +398,7 @@ worktrail review run --task-id <id> [--profile <profile>] [--json]
 только те, что нужны этому эксперту). `expected_output` — схема,
 которую должен вернуть саб-агент.
 
-### 4.15 `worktrail review result`
+### 4.16 `worktrail review result`
 
 Сохраняет вердикт ревью.
 
@@ -388,7 +410,7 @@ worktrail review result --task-id <id> --verdict <accepted|rejected> \
 Принимает готовый JSON в формате review_result (собранный агентом из
 заключений экспертов), валидирует по схеме, записывает в git-note.
 
-### 4.16 `worktrail time`
+### 4.17 `worktrail time`
 
 Вычисляет время по git-логу.
 
@@ -403,7 +425,7 @@ worktrail time [--task-id <id>] [--json]
 короткая правка с одним коммитом за 8ч покажет 0. Для точного учёта времени
 в будущем планируется дополнить анализом активности в IDE/файловой системе.
 
-### 4.17 `worktrail report`
+### 4.18 `worktrail report`
 
 Генерирует Markdown-отчёт.
 
@@ -413,7 +435,7 @@ worktrail report [--task-id <id>] [--save] [--json]
 
 Без `--task-id` — отчёт по всем задачам. С `--save` — в файл.
 
-### 4.18 `worktrail archive tck`
+### 4.19 `worktrail archive tck`
 
 Читает старую TCK-структуру `knowledge/tasks/`.
 
@@ -421,7 +443,7 @@ worktrail report [--task-id <id>] [--save] [--json]
 worktrail archive tck [--path <path>] [--task-id <id>] [--json]
 ```
 
-### 4.19 `worktrail install`
+### 4.20 `worktrail install`
 
 Глобальная установка.
 
@@ -429,7 +451,7 @@ worktrail archive tck [--path <path>] [--task-id <id>] [--json]
 worktrail install [--dry-run] [--json]
 ```
 
-### 4.20 `worktrail doctor`
+### 4.21 `worktrail doctor`
 
 Диагностика.
 
