@@ -53,6 +53,7 @@ worktrail v2 — универсальная knowledge-система задач 
 ```
 draft → active → review → done
 active → done          (прямое закрытие без ревью — для простых задач)
+review → active        (возврат на доработку после rejected ревью)
 active → blocked → active
 любой → cancelled
 ```
@@ -121,6 +122,7 @@ active → blocked → active
 | Ref | Содержимое |
 |-----|-----------|
 | `refs/notes/worktrail` | Все записи: contract, progress, decision, spec, review_package, review_result |
+
 ### Якорный коммит и тег задачи
 
 Каждая задача имеет **один якорный коммит** — это коммит, на который
@@ -226,6 +228,7 @@ worktrail context [--json]
 ```
 worktrail list [--status <s>] [--json]
 ```
+
 **Логика**: `git tag -l 'worktrail/*'` → для каждого тега читает git-note
 на соответствующем коммите → извлекает contract → фильтрует по статусу.
 
@@ -316,8 +319,8 @@ worktrail progress record --task-id <id> --summary "..." [--commit <hash>] [--js
 ```
 
 Без `--commit` — привязывается к HEAD.
-
 ### 4.11 `worktrail progress list`
+
 Хронология хода работ по задаче.
 
 ```
@@ -355,8 +358,8 @@ worktrail finalize [--task-id <id>] [--skip-review] [--json]
 2. Собирает все decisions, specs, progress из git-notes задачи
 3. Читает последний VRR из JSONL-лога
 4. Вычисляет `boundaries` (`git diff` от якорного коммита до HEAD)
-5. Формирует review_package → git-note
-6. Если `--skip-review`: статус → `done`, review_package не обязателен
+5. Если без `--skip-review`: формирует review_package → git-note
+6. Если `--skip-review`: статус → `done`. Для простых задач.
 7. Если без `--skip-review`: статус → `review`
 8. `derive_time()` → добавляет время в контракт
 
