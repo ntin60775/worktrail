@@ -175,7 +175,7 @@ def _extract_task_id_from_path(task_md_path: Path) -> Optional[str]:
     """
     # Walk up to find a directory that looks like TASK-XXX
     for parent in task_md_path.parents:
-        match = re.match(r"(TASK-\d+(?:-\d+)?(?:\.\d+)?)", parent.name, re.IGNORECASE)
+        match = re.match(r"(TASK-\d+(?:-\d+)?(?:\.\d+)*)", parent.name, re.IGNORECASE)
         if match:
             return match.group(1).upper()
     return None

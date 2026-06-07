@@ -23,7 +23,10 @@ from worktrail.migrator.parser import (
     _normalise_status,
     _parse_duration,
     _parse_frontmatter,
+    _parse_json_passport,
     _parse_table,
+    _parse_worklog_narrative,
+    _VALID_ID_RE,
 )
 
 
@@ -791,3 +794,351 @@ class TestEndToEndParser:
             assert len(entry["date"]) == 10  # YYYY-MM-DD
             assert entry["date"][4] == "-"
             assert entry["date"][7] == "-"
+
+
+# ============================================================================
+# Phase 2 tests — audit 2026-06-07
+# ============================================================================
+
+
+class TestParseTable:
+    """Tests for the rewritten _parse_table (first-table-only, skip header)."""
+
+    def test_parses_first_table_only(self) -> None:
+        """Only the first markdown table is parsed."""
+        content = (
+            "| Поле | Значение |\n"
+            "|------|----------|\n"
+            "| id   | TASK-001 |\n"
+            "\n"
+            "| Другая | Таблица |\n"
+            "|--------|---------|\n"
+            "| другой ключ | другое значение |\n"
+        )
+        result = _parse_table(content)
+        assert result == {"id": "TASK-001"}
+
+    def test_skips_header_row(self) -> None:
+        """The header row before the separator is skipped."""
+        content = (
+            "| id | статус |\n"
+            "|----|--------|\n"
+            "| TASK-002 | done |\n"
+        )
+        result = _parse_table(content)
+        # Header row 'id → статус' is skipped; only data rows are parsed
+        assert result == {"task-002": "done"}
+
+    def test_multi_column_uses_first_two(self) -> None:
+        """Tables with >2 columns use only col 1 (key) and col 2 (value)."""
+        content = (
+            "| ID | Статус | Каталог |\n"
+            "|----|--------|--------|\n"
+            "| TASK-001 | done | path/to/dir |\n"
+        )
+        result = _parse_table(content)
+        assert result == {"task-001": "done"}
+
+    def test_backtick_values_stripped(self) -> None:
+        """Backtick-wrapped values have backticks removed."""
+        content = (
+            "| Поле | Значение |\n"
+            "|------|----------|\n"
+            "| ID задачи | `TASK-003` |\n"
+            "| Статус | `завершена` |\n"
+        )
+        result = _parse_table(content)
+        assert result == {"id задачи": "TASK-003", "статус": "завершена"}
+
+    def test_empty_content_returns_empty(self) -> None:
+        """Content with no table returns empty dict."""
+        assert _parse_table("") == {}
+        assert _parse_table("## Just a heading\n\nSome text.\n") == {}
+
+
+class TestNormaliseStatus:
+    """Tests for _normalise_status with the 7-status model."""
+
+    @pytest.mark.parametrize("raw,expected", [
+        # New Russian statuses
+        ("черновик", "draft"),
+        ("на проверке", "review"),
+        ("заблокирована", "blocked"),
+        ("отменена", "cancelled"),
+        # New English identity mappings
+        ("draft", "draft"),
+        ("blocked", "blocked"),
+        ("review", "review"),
+        ("cancelled", "cancelled"),
+        # Existing ones still work
+        ("в работе", "active"),
+        ("завершена", "done"),
+        ("архив", "archived"),
+        ("active", "active"),
+        ("done", "done"),
+        ("archived", "archived"),
+        # Fallback
+        ("unknown_value", "draft"),
+        (None, "draft"),
+        ("", "draft"),
+    ])
+    def test_all_statuses(self, raw: Any, expected: str) -> None:
+        """All 7 statuses and fallback work correctly."""
+        assert _normalise_status(raw) == expected
+
+
+class TestExtractTaskIdFromPath:
+    """Tests for _extract_task_id_from_path with full ID extraction."""
+
+    def test_short_id(self) -> None:
+        """Short IDs like TASK-001 are extracted."""
+        path = Path("/tmp/knowledge/tasks/TASK-001-slug/task.md")
+        assert _extract_task_id_from_path(path) == "TASK-001"
+
+    def test_full_id(self) -> None:
+        """Full IDs like TASK-2026-0048 are extracted."""
+        path = Path("/tmp/knowledge/tasks/TASK-2026-0048-slug/task.md")
+        assert _extract_task_id_from_path(path) == "TASK-2026-0048"
+
+    def test_subtask_id(self) -> None:
+        """Subtask IDs like TASK-2026-0048.1 are extracted."""
+        path = Path("/tmp/knowledge/tasks/TASK-2026-0048-main/subtasks/TASK-2026-0048.1-slug/task.md")
+        assert _extract_task_id_from_path(path) == "TASK-2026-0048.1"
+
+    def test_deep_subtask_id(self) -> None:
+        """Deep subtask IDs like TASK-2026-0048.1.1 are extracted."""
+        path = Path("/tmp/knowledge/tasks/TASK-2026-0048-main/subtasks/TASK-2026-0048.1.1-slug/task.md")
+        assert _extract_task_id_from_path(path) == "TASK-2026-0048.1.1"
+
+    def test_no_tasks_dir(self) -> None:
+        """Path without TASK- prefix returns None."""
+        path = Path("/tmp/other/file.md")
+        assert _extract_task_id_from_path(path) is None
+
+
+class TestValidIdRegex:
+    """Tests for _VALID_ID_RE — task ID validation."""
+
+    @pytest.mark.parametrize("task_id, valid", [
+        ("TASK-001", True),
+        ("TASK-2026-0001", True),
+        ("TASK-2026-0048", True),
+        ("TASK-2026-0048.1", True),
+        ("TASK-2026-0048.1.1", True),
+        ("TASK-2026-0053.1.1", True),
+        # Invalid
+        ("СТАТУС", False),
+        ("TASK-2026", True),  # structurally valid (year-only), garbage caught elsewhere
+        ("INV-1", False),
+        ("task-2026-0001", False),  # lowercase
+        ("", False),
+    ])
+    def test_validation(self, task_id: str, valid: bool) -> None:
+        """_VALID_ID_RE accepts valid IDs, rejects garbage."""
+        match = _VALID_ID_RE.match(task_id)
+        if valid:
+            assert match is not None, f"Expected {task_id!r} to be valid"
+        else:
+            assert match is None, f"Expected {task_id!r} to be invalid"
+
+
+class TestParentIdEmptyMarkers:
+    """Tests for parent_id extraction with empty-marker filtering."""
+
+    def _parse_with_table(self, table_content: str) -> Dict[str, Any]:
+        """Helper: create a task.md with given table and parse it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            task_dir = root / "knowledge" / "tasks" / "TASK-001-test"
+            task_dir.mkdir(parents=True)
+            task_md = task_dir / "task.md"
+            task_md.write_text(table_content, encoding="utf-8")
+            return parse_v1_task(task_md)
+
+    def test_em_dash_is_none(self) -> None:
+        """Em-dash (—) in parent ID is treated as no parent."""
+        content = (
+            "| Поле | Значение |\n"
+            "|------|----------|\n"
+            "| ID задачи | TASK-001 |\n"
+            "| Parent ID | `—` |\n"
+            "| Статус | done |\n"
+        )
+        result = self._parse_with_table(content)
+        assert result["parent_id"] is None
+
+    def test_hyphen_is_none(self) -> None:
+        """Hyphen (-) in parent ID is treated as no parent."""
+        content = (
+            "| Поле | Значение |\n"
+            "|------|----------|\n"
+            "| ID задачи | TASK-001 |\n"
+            "| parent id | - |\n"
+            "| Статус | done |\n"
+        )
+        result = self._parse_with_table(content)
+        assert result["parent_id"] is None
+
+    def test_net_is_none(self) -> None:
+        """"нет" in parent ID is treated as no parent."""
+        content = (
+            "| Поле | Значение |\n"
+            "|------|----------|\n"
+            "| ID задачи | TASK-001 |\n"
+            "| родитель | нет |\n"
+            "| Статус | done |\n"
+        )
+        result = self._parse_with_table(content)
+        assert result["parent_id"] is None
+
+    def test_real_parent_id_preserved(self) -> None:
+        """A real parent ID is preserved."""
+        content = (
+            "| Поле | Значение |\n"
+            "|------|----------|\n"
+            "| ID задачи | TASK-001 |\n"
+            "| parent_id | TASK-000 |\n"
+            "| Статус | done |\n"
+        )
+        result = self._parse_with_table(content)
+        assert result["parent_id"] == "TASK-000"
+
+
+class TestParseJsonPassport:
+    """Tests for _parse_json_passport — task.json parser."""
+
+    def test_basic_json(self) -> None:
+        """Basic JSON with standard keys."""
+        content = '{"id": "TASK-001", "name": "Test", "status": "done"}'
+        result = _parse_json_passport(content)
+        assert result["id"] == "TASK-001"
+        assert result["name"] == "Test"
+        assert result["status"] == "done"
+
+    def test_camelcase_keys(self) -> None:
+        """CamelCase keys are normalised."""
+        content = '{"taskId": "TASK-002", "parentId": "TASK-001", "createdAt": "2026-01-01"}'
+        result = _parse_json_passport(content)
+        assert result["id"] == "TASK-002"
+        assert result["parent_id"] == "TASK-001"
+        assert result["created_at"] == "2026-01-01"
+
+    def test_invalid_json(self) -> None:
+        """Invalid JSON returns empty dict."""
+        assert _parse_json_passport("{not json}") == {}
+        assert _parse_json_passport("") == {}
+
+    def test_non_dict_json(self) -> None:
+        """JSON array or scalar returns empty dict."""
+        assert _parse_json_passport("[1, 2, 3]") == {}
+        assert _parse_json_passport('"string"') == {}
+
+
+class TestParseWorklogNarrative:
+    """Tests for _parse_worklog_narrative — ## YYYY-MM-DD format."""
+
+    def test_single_section(self) -> None:
+        """A single ## YYYY-MM-DD section is parsed."""
+        content = (
+            "## 2026-05-06\n\n"
+            "### Этап 1\n"
+            "- Сделано что-то важное\n"
+            "- Ещё одно действие\n"
+        )
+        entries = _parse_worklog_narrative(content)
+        assert len(entries) == 1
+        assert entries[0]["date"] == "2026-05-06"
+        assert "Этап 1" in entries[0]["message"]
+
+    def test_multiple_sections(self) -> None:
+        """Multiple ## YYYY-MM-DD sections are parsed."""
+        content = (
+            "## 2026-05-06\n\n"
+            "День первый.\n\n"
+            "## 2026-05-07\n\n"
+            "День второй.\n"
+        )
+        entries = _parse_worklog_narrative(content)
+        assert len(entries) == 2
+        assert entries[0]["date"] == "2026-05-06"
+        assert entries[1]["date"] == "2026-05-07"
+
+    def test_empty_sections_skipped(self) -> None:
+        """Sections with no body are skipped."""
+        content = "## 2026-05-06\n\n## 2026-05-07\n\nДень второй.\n"
+        entries = _parse_worklog_narrative(content)
+        assert len(entries) == 1
+        assert entries[0]["date"] == "2026-05-07"
+
+    def test_no_sections(self) -> None:
+        """Content with no ## YYYY-MM-DD returns empty list."""
+        assert _parse_worklog_narrative("Just some text\n") == []
+        assert _parse_worklog_narrative("") == []
+
+
+class TestMigrationReportCounters:
+    """Tests for MigrationReport counters."""
+
+    def test_str_includes_journal_entries(self) -> None:
+        """__str__ includes journal_entries_created."""
+        report = MigrationReport()
+        report.tasks_migrated = 5
+        report.journal_entries_created = 12
+        report.sessions_created = 2
+        s = str(report)
+        assert "tasks_migrated=5" in s
+        assert "journal_entries_created=12" in s
+        assert "sessions_created=2" in s
+
+    def test_to_markdown_includes_all_fields(self) -> None:
+        """to_markdown includes all counters."""
+        report = MigrationReport()
+        report.tasks_migrated = 3
+        report.journal_entries_created = 7
+        report.sessions_created = 1
+        report.checkpoints_created = 4
+        md = report.to_markdown()
+        assert "3" in md
+        assert "7" in md
+
+
+class TestIdempotentJournalEntry:
+    """Tests for idempotent add_journal_entry."""
+
+    def test_duplicate_returns_existing(self, tmp_path: Path) -> None:
+        """Adding the same (task_id, kind, title) twice returns existing."""
+        from worktrail.core.db import init_db
+        from worktrail.core.repository import Repository
+
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        repo = Repository(db_path)
+
+        # First insert
+        e1 = repo.add_journal_entry("TASK-001", "note", "Test", "Body")
+        assert e1.id is not None
+
+        # Second insert with same parameters
+        e2 = repo.add_journal_entry("TASK-001", "note", "Test", "Body v2")
+        # Should return existing entry, not create duplicate
+        assert e2.id == e1.id
+
+        # Verify only one row exists
+        with repo.conn() as conn:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM journal WHERE task_id=? AND kind=? AND title=?",
+                ("TASK-001", "note", "Test"),
+            )
+            assert cur.fetchone()[0] == 1
+
+    def test_different_title_creates_new(self, tmp_path: Path) -> None:
+        from worktrail.core.db import init_db
+        from worktrail.core.repository import Repository
+
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        repo = Repository(db_path)
+
+        e1 = repo.add_journal_entry("TASK-001", "note", "Title A", "Body")
+        e2 = repo.add_journal_entry("TASK-001", "note", "Title B", "Body")
+        assert e2.id != e1.id
