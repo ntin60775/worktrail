@@ -1,12 +1,13 @@
 # worktrail
 
-Runtime-система учёта рабочего времени разработчика, привязанная к задачам
-внутри git-репозитория.
+Система управления знаниями по задачам и учёта рабочего времени внутри
+git-репозитория.
 
-**What is worktrail.**  A lightweight, developer-focused time tracker that
-lives inside your git repo.  You bind time entries to task IDs (JIRA, ERP,
-ЗАКАЗ — anything) and record progress as you work.  Everything is stored in a
-local SQLite database (`.worktrail/runtime.db`); no cloud service, no login,
+**What is worktrail.**  A task knowledge & time management system that lives
+inside your git repo.  Beyond time tracking, it captures design decisions,
+specifications, architecture rationale, and research notes — all linked to
+task IDs (JIRA, ERP, ЗАКАЗ — anything).  Everything is stored in a local
+SQLite database (`.worktrail/runtime.db`); no cloud service, no login,
 no subscription.  Russian CLI output, English code.
 
 ```
@@ -64,6 +65,24 @@ worktrail report
 # → └── [1.5ч] Реализовал endpoint /pay
 # → Итого: 3.7ч | Статус: в работе
 ```
+
+# 6. Capture design decisions and specs
+worktrail journal ERP-4521 --kind decision --title "Chose gRPC" --body "Better streaming support than REST"
+worktrail journal ERP-4521 --kind spec --title "API /pay" --body "ADDED: amount > 0 validation"
+# → Запись добавлена в журнал задачи
+
+# 7. Lightweight research (no time tracking)
+worktrail explore "Investigate payment gateway API"
+# → Исследование создано: EXPL-0001
+
+# 8. Group tasks into an initiative
+worktrail initiative "Payment System Migration"
+worktrail start TASK-002 --parent "Payment System Migration" --name "New /refund endpoint"
+# → Задача TASK-002 привязана к инициативе
+
+# 9. Export a task with journal to Markdown
+worktrail report --task ERP-4521 --save
+# → .worktrail/reports/ERP-4521.md
 
 ---
 
@@ -216,6 +235,9 @@ After this, any AI agent with skill support will:
 - Auto-detect `.worktrail/` directories
 - Know to run `worktrail start` before tasks
 - Record checkpoints and generate reports on request
+- Capture design decisions, specs, and proposals in journal
+- Create explorations for research tasks, initiatives for grouping
+- Manage task status transitions (draft → active → review → done)
 
 ---
 
@@ -262,14 +284,18 @@ src/worktrail/
 │   ├── doctor.py         ← diagnostics (schema, hooks, idle)
 │   └── handlers/
 │       ├── task.py       ← start, stop, pause, resume, checkpoint, status
+│       ├── journal.py    ← journal add, list, show
+│       ├── explore.py    ← lightweight exploration tasks
+│       ├── initiative.py ← initiative create, list, show
+│       ├── archive.py    ← task archiving
 │       ├── report.py     ← report generation
 │       ├── migrate.py    ← v1 migration
 │       └── system.py     ← list, uninstall
 ├── core/
 │   ├── __init__.py       ← find_project_root() (generic path discovery)
-│   ├── models.py         ← Task, Session, Checkpoint, Config dataclasses
-│   ├── db.py             ← SQLite schema + get_db_path() + get_connection()
-│   ├── repository.py     ← CRUD operations
+│   ├── models.py         ← Task (kind, branch), Session, Checkpoint, JournalEntry, Config
+│   ├── db.py             ← SQLite schema (tasks, sessions, checkpoints, journal) + migration
+│   ├── repository.py     ← CRUD for tasks, sessions, checkpoints, journal
 │   └── config.py         ← YAML config load/save
 ├── git_bridge/
 │   ├── __init__.py       ← public API exports
@@ -292,6 +318,7 @@ src/worktrail/
 - **No lock-in** — plain SQLite + YAML; read directly or export to Markdown
 - **Git-native** — lives inside repos, follows branch switches, hooks into commits
 - **Single active session** — only one session can be active at a time
+- **Knowledge as first-class citizen** — journal captures decisions, specs, and rationale alongside time data
 - **Russian CLI** — all user-facing text in Russian; code and docs in English
 
 ---
