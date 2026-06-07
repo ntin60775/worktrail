@@ -1,11 +1,11 @@
 {
   "contract": {
-    "task_id": "ERP-4521",
-    "name": "ERP Integration",
-    "summary": "ERP Integration",
+    "task_id": "ТЕСТ-003",
+    "name": "Test Cyrillic",
+    "summary": "Test Cyrillic",
     "status": "draft",
-    "created_at": "2026-06-08T00:36:12.649053806+02:00",
-    "updated_at": "2026-06-08T00:36:12.649053806+02:00",
+    "created_at": "2026-06-08T00:36:12.785621428+02:00",
+    "updated_at": "2026-06-08T00:36:12.785621428+02:00",
     "branch": "main"
   },
   "decisions": [
