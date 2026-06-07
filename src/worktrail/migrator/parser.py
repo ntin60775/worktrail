@@ -7,7 +7,8 @@ Handles ``task.md`` and ``worklog.md`` files found in
 * ``parse_v1_worklog`` extracts dated time entries from worklog files.
 
 Both Russian and English status names are normalised to worktrail's
-four canonical values: ``active``, ``paused``, ``done``, ``archived``.
+seven canonical values: ``draft``, ``active``, ``blocked``, ``review``,
+``done``, ``archived``, ``cancelled``.
 """
 
 from __future__ import annotations
@@ -84,30 +85,41 @@ _STATUS_MAP: Dict[str, str] = {
     "активна": "active",
     "активный": "active",
     "начата": "active",
-    "пауза": "paused",
-    "приостановлена": "paused",
+    "пауза": "blocked",
+    "приостановлена": "blocked",
+    "черновик": "draft",
     "завершена": "done",
     "готово": "done",
     "выполнена": "done",
     "закрыта": "done",
+    "на проверке": "review",
+    "заблокирована": "blocked",
+    "отменена": "cancelled",
     "архив": "archived",
     "в архиве": "archived",
     # English
     "active": "active",
     "in progress": "active",
     "started": "active",
-    "paused": "paused",
-    "pause": "paused",
-    "on hold": "paused",
+    "paused": "blocked",
+    "pause": "blocked",
+    "on hold": "blocked",
+    "draft": "draft",
+    "blocked": "blocked",
+    "review": "review",
     "done": "done",
     "completed": "done",
     "finished": "done",
     "closed": "done",
+    "cancelled": "cancelled",
     "archived": "archived",
 }
 
 # Regex to match ISO-like dates (YYYY-MM-DD)
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# Regex to validate task IDs — rejects non-TASK strings like 'СТАТУС'
+_VALID_ID_RE = re.compile(r"^TASK-\d+(-\d+)?(\.\d+)?$")
 
 # Regex for frontmatter delimiters
 _FRONTMATTER_RE = re.compile(
@@ -142,13 +154,14 @@ def _normalise_status(raw: Optional[str]) -> str:
         raw: The status string from the v1 file (may be Russian or English).
 
     Returns:
-        One of ``'active'``, ``'paused'``, ``'done'``, ``'archived'``.
-        Falls back to ``'active'`` when the input is unrecognised.
+        One of ``'draft'``, ``'active'``, ``'blocked'``, ``'review'``,
+        ``'done'``, ``'archived'``, ``'cancelled'``.
+        Falls back to ``'draft'`` when the input is unrecognised.
     """
     if not raw:
-        return "active"
+        return "draft"
     key = raw.strip().lower()
-    return _STATUS_MAP.get(key, "active")
+    return _STATUS_MAP.get(key, "draft")
 
 
 def _extract_task_id_from_path(task_md_path: Path) -> Optional[str]:
@@ -164,7 +177,7 @@ def _extract_task_id_from_path(task_md_path: Path) -> Optional[str]:
     """
     # Walk up to find a directory that looks like TASK-XXX
     for parent in task_md_path.parents:
-        match = re.match(r"(TASK-\d+)", parent.name, re.IGNORECASE)
+        match = re.match(r"(TASK-\d+(?:-\d+)?(?:\.\d+)?)", parent.name, re.IGNORECASE)
         if match:
             return match.group(1).upper()
     return None
@@ -187,7 +200,7 @@ def _parse_table(content: str) -> Dict[str, str]:
         match = _TABLE_ROW_RE.match(line.strip())
         if match:
             key = match.group(1).strip().lower()
-            value = match.group(2).strip()
+            value = match.group(2).strip().strip('`')
             result[key] = value
     return result
 
@@ -284,7 +297,7 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
 
         * ``id`` — task identifier (upper-case)
         * ``name`` — human-readable task name
-        * ``status`` — canonical status (active/paused/done/archived)
+        * ``status`` — canonical status (draft/active/blocked/review/done/archived/cancelled)
         * ``branch`` — associated git branch
         * ``created_at`` — ISO8601 timestamp string
         * ``updated_at`` — ISO8601 timestamp string
@@ -320,11 +333,16 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
         raise ValueError(
             f"Cannot determine task ID from {task_md_path}"
         )
+    if task_id and not _VALID_ID_RE.match(task_id):
+        raise ValueError(
+            f"Invalid task ID format {task_id!r} from {task_md_path}; "
+            f"expected TASK-NNN, TASK-NNN-NNNN, or TASK-NNN-NNNN.N"
+        )
     result["id"] = task_id
 
     # --- Name ---
     name: Optional[str] = None
-    for key in ("name", "title", "название", "имя", "заголовок"):
+    for key in ("name", "title", "название", "имя", "заголовок", "краткое имя"):
         if raw_data and key in raw_data and raw_data[key]:
             name = str(raw_data[key]).strip()
             break
@@ -374,9 +392,12 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
 
     # --- Parent ---
     parent_id: Optional[str] = None
-    for key in ("parent_id", "parent", "родитель"):
+    for key in ("parent_id", "parent", "parent id", "родитель"):
         if raw_data and key in raw_data and raw_data[key]:
-            parent_id = str(raw_data[key]).strip().upper() or None
+            raw_parent = str(raw_data[key]).strip().strip('`').upper()
+            # Treat empty markers as no parent
+            if raw_parent not in ("", "—", "-", "–", "НЕТ", "NULL", "NONE", "N/A", "Н/Д"):
+                parent_id = raw_parent
             break
     result["parent_id"] = parent_id
 
