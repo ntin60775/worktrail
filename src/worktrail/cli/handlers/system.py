@@ -94,7 +94,7 @@ def cmd_git_checkout_hook(args: argparse.Namespace) -> int:
 
 
 @command("list", help="Список всех задач")
-@arg("--status", default=None, help="Фильтр по статусу (draft, active, blocked, review, delivery, done, cancelled)")
+@arg("--status", default=None, help="Фильтр по статусу (draft, active, blocked, review, done, cancelled)")
 @arg("--kind", default=None, choices=["task", "exploration", "initiative"], help="Фильтр по типу задачи")
 @arg("--parent", default=None, metavar="TASK-ID", help="Показать подзадачи родительской задачи")
 @arg("--archived", action="store_true", help="Включить архивные задачи")
@@ -211,7 +211,6 @@ def _translate_status(status: str) -> str:
         "active":    "В работе",
         "blocked":   "Заблок.",
         "review":    "Ревью",
-        "delivery":  "Доставка",
         "done":      "Заверш.",
         "archived":  "Архив",
         "cancelled": "Отмен.",

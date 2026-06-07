@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     name TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft'
         CHECK (status IN ('draft', 'active', 'blocked', 'review',
-                          'delivery', 'done', 'archived', 'cancelled')),
+                          'done', 'archived', 'cancelled')),
     parent_id TEXT REFERENCES tasks(id),
     kind TEXT NOT NULL DEFAULT 'task'
         CHECK (kind IN ('task', 'exploration', 'initiative')),

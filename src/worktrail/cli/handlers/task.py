@@ -129,7 +129,7 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
 @command("status", help="Показать текущую сессию или изменить статус задачи")
 @arg("task_id", nargs="?", default=None, help="Идентификатор задачи для изменения статуса")
 @arg("--set", dest="set_status", default=None,
-     choices=["draft", "active", "blocked", "review", "delivery", "done", "archived", "cancelled"],
+     choices=["draft", "active", "blocked", "review", "done", "archived", "cancelled"],
      help="Установить статус задачи")
 @arg("--note", default=None, help="Примечание при смене статуса")
 def cmd_status(args: argparse.Namespace) -> int:

@@ -18,7 +18,7 @@ class Task:
         id: Unique task identifier (e.g. 'TASK-2025-0042').
         name: Human-readable task name.
         status: Task status — one of 'draft', 'active', 'blocked', 'review',
-            'delivery', 'done', 'archived', 'cancelled'.
+            'done', 'archived', 'cancelled'.
         kind: Task kind — 'task', 'exploration', or 'initiative'.
         branch: Associated git branch name, if any.
         created_at: ISO8601 timestamp of creation (UTC).
