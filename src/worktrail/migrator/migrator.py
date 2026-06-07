@@ -226,6 +226,8 @@ class Migrator:
         # Step 8 — git add + commit
         self._git_commit()
 
+        # Step 9 — physically remove knowledge/ (after successful commit)
+        self._remove_knowledge_dir_physical()
         return self._report
 
     # ------------------------------------------------------------------
@@ -289,14 +291,25 @@ class Migrator:
             self._report.errors.append("Repository not available; skipping task migration.")
             return
 
-        task_md_files = sorted(self._tasks_dir.glob("TASK-*/task.md"))
-        logger.info("Found %d task.md files to migrate", len(task_md_files))
+        # Find both task.md and task.json files
+        md_files = sorted(
+            p for p in self._tasks_dir.rglob("TASK-*/task.md")
+            if "_templates" not in str(p)
+        )
+        json_files = sorted(
+            p for p in self._tasks_dir.rglob("TASK-*/task.json")
+            if "_templates" not in str(p)
+            and not (p.parent / "task.md").exists()
+        )
+        all_files = md_files + json_files
+        logger.info("Found %d task files (%d md + %d json)",
+                     len(all_files), len(md_files), len(json_files))
 
-        for task_md_path in task_md_files:
+        for task_file_path in all_files:
             try:
-                parsed = parse_v1_task(task_md_path)
+                parsed = parse_v1_task(task_file_path)
             except Exception as exc:
-                msg = f"Failed to parse {task_md_path}: {exc}"
+                msg = f"Failed to parse {task_file_path}: {exc}"
                 logger.warning(msg)
                 self._report.errors.append(msg)
                 continue
@@ -335,7 +348,7 @@ class Migrator:
                 continue
 
             # Parse worklog if present
-            worklog_path = task_md_path.parent / "worklog.md"
+            worklog_path = task_file_path.parent / "worklog.md"
             try:
                 self._migrate_worklog(task_id, worklog_path)
             except Exception as exc:
@@ -343,7 +356,7 @@ class Migrator:
 
             # Import knowledge files as journal entries
             try:
-                self._migrate_journal(task_id, task_md_path.parent)
+                self._migrate_journal(task_id, task_file_path.parent)
             except Exception as exc:
                 logger.warning("Failed to migrate journal for %s: %s", task_id, exc)
     def _migrate_worklog(self, task_id: str, worklog_path: Path) -> None:
@@ -376,6 +389,15 @@ class Migrator:
 
         for entry_date, day_entries in sorted(by_date.items()):
             try:
+                # Check if session already exists for this task+date (idempotent)
+                with self._repo.conn() as conn:
+                    cur = conn.execute(
+                        "SELECT id FROM sessions WHERE task_id=? AND date(started_at)=?",
+                        (task_id, entry_date),
+                    )
+                    if cur.fetchone() is not None:
+                        continue  # already migrated, skip
+
                 # Create one session per date
                 started_at = datetime.fromisoformat(f"{entry_date}T09:00:00+00:00")
                 session = Session(
@@ -521,10 +543,13 @@ class Migrator:
         if task_md_path.is_file():
             try:
                 content = task_md_path.read_text(encoding="utf-8")
-                # ## Цель or ## Описание → proposal
                 for section_re, kind, title in [
                     (r"## Цель\s*\n+(.*?)(?=\n## |\Z)", "proposal", "Цель задачи"),
                     (r"## Описание\s*\n+(.*?)(?=\n## |\Z)", "proposal", "Описание задачи"),
+                    (r"## Контекст\s*\n+(.*?)(?=\n## |\Z)", "note", "Контекст"),
+                    (r"## Границы\s*\n+(.*?)(?=\n## |\Z)", "note", "Границы"),
+                    (r"## Критерии готовности\s*\n+(.*?)(?=\n## |\Z)", "note", "Критерии готовности"),
+                    (r"## Стратегия проверки\s*\n+(.*?)(?=\n## |\Z)", "note", "Стратегия проверки"),
                     (r"## Итог\s*\n+(.*?)(?=\n## |\Z)", "note", "Итог"),
                 ]:
                     m = re.search(section_re, content, re.DOTALL)
@@ -556,32 +581,40 @@ class Migrator:
             self._report.errors.append(msg)
 
     def _remove_knowledge_dir(self) -> None:
-        """Remove ``knowledge/`` from disk and stage the deletion in git."""
+        """Stage ``knowledge/`` removal in git index (no physical delete yet)."""
         import shutil
 
         try:
             rel_path = str(self.source_knowledge_path.relative_to(self.project_root))
-            # Try git rm first (for tracked files)
-            result = subprocess.run(
+            subprocess.run(
                 ["git", "rm", "-rf", "--cached", rel_path],
                 cwd=str(self.project_root),
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            # Also remove from disk (handles untracked files)
-            if self.source_knowledge_path.exists():
-                shutil.rmtree(self.source_knowledge_path)
-            # Stage any remaining changes
             subprocess.run(
                 ["git", "add", "-A"],
                 cwd=str(self.project_root),
                 check=False,
                 capture_output=True,
             )
-            logger.info("Removed %s", self.source_knowledge_path)
+            logger.info("Staged removal of %s", self.source_knowledge_path)
         except Exception as exc:
-            msg = f"Failed to remove knowledge/: {exc}"
+            msg = f"Failed to stage removal of knowledge/: {exc}"
+            logger.warning(msg)
+            self._report.errors.append(msg)
+
+    def _remove_knowledge_dir_physical(self) -> None:
+        """Physically remove ``knowledge/`` from disk (after successful commit)."""
+        import shutil
+
+        try:
+            if self.source_knowledge_path.exists():
+                shutil.rmtree(self.source_knowledge_path)
+                logger.info("Physically removed %s", self.source_knowledge_path)
+        except Exception as exc:
+            msg = f"Failed to physically remove knowledge/: {exc}"
             logger.warning(msg)
             self._report.errors.append(msg)
 
