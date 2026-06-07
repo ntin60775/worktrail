@@ -1,0 +1,11 @@
+{
+  "contract": {
+    "task_id": "TASK-001",
+    "name": "Test task",
+    "summary": "Test task",
+    "status": "draft",
+    "created_at": "2026-06-08T00:32:09.535558162+02:00",
+    "updated_at": "2026-06-08T00:32:09.535558162+02:00",
+    "branch": "main"
+  }
+}
