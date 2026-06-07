@@ -19,7 +19,7 @@ const WorktrailDir = ".worktrail"
 
 // AnchorCommit finds or creates the anchor commit for a task.
 // If a tag worktrail/<taskID> exists, returns its target commit.
-// Otherwise, falls back to HEAD.
+// For new tasks, creates an empty anchor commit and tags it.
 func AnchorCommit(taskID string) (string, error) {
 	tag := TagPrefix + sanitizeTag(taskID)
 
@@ -29,15 +29,21 @@ func AnchorCommit(taskID string) (string, error) {
 		return strings.TrimSpace(out), nil
 	}
 
-	// Fall back to HEAD
+	// No existing tag — create a unique anchor commit for this task.
+	// Use an empty commit to avoid sharing anchor with other tasks on HEAD.
+	commitMsg := fmt.Sprintf("worktrail: anchor for %s", taskID)
+	_, err = git("commit", "--allow-empty", "-m", commitMsg)
+	if err != nil {
+		return "", fmt.Errorf("create anchor commit: %w", err)
+	}
 	return HEAD()
 }
 
 // CreateAnchor ensures the anchor tag exists on the given commit.
 func CreateAnchor(taskID, commit string) error {
 	tag := TagPrefix + sanitizeTag(taskID)
-	_, err := git("tag", "-f", tag, commit)
-	return err
+	_, tagErr := git("tag", "-f", tag, commit)
+	return tagErr
 }
 
 // HEAD returns the current HEAD commit hash.
@@ -58,24 +64,34 @@ func CurrentBranch() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// sanitizeTag replaces characters unsafe for git tags with dashes.
+// sanitizeTag replaces non-ASCII/unsafe characters with dashes and appends a
+// short hash of the original taskID to prevent collisions between different
+// non-ASCII IDs that sanitize to the same tag.
 func sanitizeTag(taskID string) string {
 	var b strings.Builder
+	lastDash := false
 	for _, r := range taskID {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			(r >= '0' && r <= '9') || r == '_' || r == '.' {
 			b.WriteRune(r)
+			lastDash = false
 		} else {
-			b.WriteByte('-')
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
 		}
 	}
-	result := b.String()
-	// Trim leading/trailing dashes
-	result = strings.Trim(result, "-")
+	result := strings.Trim(b.String(), "-")
 	if result == "" {
-		return "task"
+		result = "x"
 	}
-	return result
+	// Hash suffix for collision safety
+	h := uint32(0)
+	for _, r := range taskID {
+		h = h*31 + uint32(r)
+	}
+	return fmt.Sprintf("%s-%04x", result, h&0xFFFF)
 }
 
 // ─── Tag listing ────────────────────────────────────────────────────────────
@@ -131,7 +147,6 @@ func Write(anchorCommit string, note *types.TaskNote) error {
 	if err != nil {
 		return fmt.Errorf("marshal task note: %w", err)
 	}
-	// Use --force to overwrite existing note
 	err = gitStdin("notes", "--ref="+NotesRef, "add", "-f", "-F", "-", anchorCommit, string(data))
 	if err != nil {
 		return fmt.Errorf("write note: %w", err)
@@ -171,7 +186,6 @@ func git(args ...string) (string, error) {
 
 // gitStdin runs a git command, piping stdin content.
 func gitStdin(args ...string) error {
-	// The last two args are: anchorCommit and stdinContent
 	n := len(args)
 	content := args[n-1]
 	anchor := args[n-2]

@@ -19,6 +19,7 @@ import (
 	"worktrail/internal/report"
 	"worktrail/internal/reviewer"
 	"worktrail/internal/verify"
+	_ "worktrail/internal/verify/adapters" // register adapters via init()
 	wt "worktrail/internal/time"
 	"worktrail/internal/types"
 )

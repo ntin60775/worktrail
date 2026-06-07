@@ -32,7 +32,7 @@ func Init(taskID, name, scope string) (*types.Contract, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read existing note: %w", err)
 	}
-	if existing.Contract != nil {
+	if existing.Contract != nil && existing.Contract.TaskID == taskID {
 		return nil, ErrContractExists
 	}
 
