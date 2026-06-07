@@ -107,6 +107,7 @@ class MigrationReport:
         parts = [
             f"MigrationReport(",
             f"  tasks_migrated={self.tasks_migrated}",
+            f"  journal_entries_created={self.journal_entries_created}",
             f"  sessions_created={self.sessions_created}",
             f"  checkpoints_created={self.checkpoints_created}",
             f"  migration_branch={self.migration_branch!r}",
@@ -320,6 +321,7 @@ class Migrator:
                 else:
                     # Update existing task status if needed
                     self._repo.update_task_status(task_id, task_status)
+                self._report.tasks_migrated += 1
                 self._report.task_mapping.append({
                     "old_id": task_id,
                     "name": task_name,
@@ -334,10 +336,16 @@ class Migrator:
 
             # Parse worklog if present
             worklog_path = task_md_path.parent / "worklog.md"
-            self._migrate_worklog(task_id, worklog_path)
+            try:
+                self._migrate_worklog(task_id, worklog_path)
+            except Exception as exc:
+                logger.warning("Failed to migrate worklog for %s: %s", task_id, exc)
 
             # Import knowledge files as journal entries
-            self._migrate_journal(task_id, task_md_path.parent)
+            try:
+                self._migrate_journal(task_id, task_md_path.parent)
+            except Exception as exc:
+                logger.warning("Failed to migrate journal for %s: %s", task_id, exc)
     def _migrate_worklog(self, task_id: str, worklog_path: Path) -> None:
         """Parse a worklog and create sessions + checkpoints.
 
@@ -466,8 +474,8 @@ class Migrator:
                         body=body[:10000],
                     )
                     self._report.journal_entries_created += 1
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to import sdd for %s: %s", task_id, exc)
                 break
         # decisions.md → decision entries
         decisions_path = task_dir / "decisions.md"
@@ -490,8 +498,8 @@ class Migrator:
                         body=body_text[:10000],
                     )
                     self._report.journal_entries_created += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to import decisions for %s: %s", task_id, exc)
 
         # plan.md → design
         plan_path = task_dir / "plan.md"
@@ -505,8 +513,8 @@ class Migrator:
                     body=body[:10000],
                 )
                 self._report.journal_entries_created += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to import plan for %s: %s", task_id, exc)
 
         # task.md description section → proposal
         task_md_path = task_dir / "task.md"
@@ -525,8 +533,8 @@ class Migrator:
                             body=body[:10000],
                         )
                         self._report.journal_entries_created += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to import task.md description for %s: %s", task_id, exc)
 
     def _install_hooks(self) -> None:
         try:
