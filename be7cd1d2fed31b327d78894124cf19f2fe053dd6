@@ -8,6 +8,15 @@
     "updated_at": "2026-06-08T00:32:09.535558162+02:00",
     "branch": "main"
   },
+  "decisions": [
+    {
+      "id": "d1",
+      "task_id": "TASK-001",
+      "title": "Use git-notes",
+      "rationale": "Immutable knowledge in git",
+      "created_at": "2026-06-08T00:32:14.41075978+02:00"
+    }
+  ],
   "progress": [
     {
       "task_id": "TASK-001",
