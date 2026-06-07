@@ -12,6 +12,7 @@ Provides:
 from __future__ import annotations
 
 import argparse
+import sys
 
 from worktrail.cli.commands import (
     arg,
@@ -22,6 +23,7 @@ from worktrail.cli.commands import (
     get_engine,
     pluralize,
 )
+from worktrail.core import Repository
 
 
 @command("start", help="Начать сессию для задачи")
@@ -124,11 +126,31 @@ def cmd_checkpoint(args: argparse.Namespace) -> int:
     return 0
 
 
-@command("status", help="Показать текущую сессию и время")
+@command("status", help="Показать текущую сессию или изменить статус задачи")
+@arg("task_id", nargs="?", default=None, help="Идентификатор задачи для изменения статуса")
+@arg("--set", dest="set_status", default=None,
+     choices=["draft", "active", "blocked", "review", "delivery", "done", "archived", "cancelled"],
+     help="Установить статус задачи")
+@arg("--note", default=None, help="Примечание при смене статуса")
 def cmd_status(args: argparse.Namespace) -> int:
-    """Handle ``worktrail status``."""
+    """Handle ``worktrail status [<task-id> --set <status>]``."""
     project_root = ensure_project_root()
     ensure_worktrail_dir(project_root)
+
+    if args.set_status:
+        if args.task_id is None:
+            print("Ошибка: укажите task_id для изменения статуса", file=sys.stderr)
+            return 1
+        db_path = project_root / ".worktrail" / "runtime.db"
+        repo = Repository(db_path)
+        task = repo.get_task(args.task_id)
+        if task is None:
+            print(f"Ошибка: задача {args.task_id} не найдена", file=sys.stderr)
+            return 1
+        repo.update_task_status(args.task_id, args.set_status)
+        note = f" ({args.note})" if args.note else ""
+        print(f"Статус задачи {args.task_id}: {task.status} → {args.set_status}{note}")
+        return 0
 
     engine = get_engine(project_root)
     info = engine.current()

@@ -2,7 +2,7 @@
 
 This module is the foundation of the worktrail runtime. It provides:
 
-* **Models** — :class:`Task`, :class:`Session`, :class:`Checkpoint`, :class:`Config`
+* **Models** — :class:`Task`, :class:`Session`, :class:`Checkpoint`, :class:`JournalEntry`, :class:`Config`
 * **Database** — connection helpers, schema creation, and migrations
 * **Repository** — CRUD operations for all entities
 * **Config** — YAML-based configuration loading / saving
@@ -12,14 +12,15 @@ This module is the foundation of the worktrail runtime. It provides:
 from pathlib import Path
 from typing import Optional
 
-from worktrail.core.config import load_config, save_config, get_config_path
+from worktrail.core.config import get_config_path, load_config, save_config
 from worktrail.core.db import (
     get_connection,
     get_db_path,
     init_db,
     init_worktrail_dir,
+    migrate_schema,
 )
-from worktrail.core.models import Checkpoint, Config, Session, Task
+from worktrail.core.models import Checkpoint, Config, JournalEntry, Session, Task
 from worktrail.core.repository import Repository
 
 __all__ = [
@@ -27,11 +28,13 @@ __all__ = [
     "Task",
     "Session",
     "Checkpoint",
+    "JournalEntry",
     "Config",
     # Database
     "get_db_path",
     "init_db",
     "init_worktrail_dir",
+    "migrate_schema",
     "get_connection",
     # Repository
     "Repository",

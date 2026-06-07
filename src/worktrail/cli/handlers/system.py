@@ -94,33 +94,41 @@ def cmd_git_checkout_hook(args: argparse.Namespace) -> int:
 
 
 @command("list", help="Список всех задач")
-@arg("--status", choices=["active", "done", "all"], default="all", help="Фильтр по статусу")
+@arg("--status", default=None, help="Фильтр по статусу (draft, active, blocked, review, delivery, done, cancelled)")
+@arg("--kind", default=None, choices=["task", "exploration", "initiative"], help="Фильтр по типу задачи")
+@arg("--parent", default=None, metavar="TASK-ID", help="Показать подзадачи родительской задачи")
+@arg("--archived", action="store_true", help="Включить архивные задачи")
 def cmd_list(args: argparse.Namespace) -> int:
-    """Handle ``worktrail list [--status]``."""
+    """Handle ``worktrail list [--status] [--kind] [--parent] [--archived]``."""
     project_root = ensure_project_root()
     ensure_worktrail_dir(project_root)
 
     db_path = project_root / ".worktrail" / "runtime.db"
     repo = Repository(db_path)
 
-    # Determine filter
-    status_filter: Optional[str] = None
-    if args.status != "all":
-        status_filter = args.status
-
-    tasks = repo.list_tasks(status=status_filter)
+    tasks = repo.list_tasks(
+        status=args.status,
+        kind=args.kind,
+        parent_id=args.parent,
+        include_archived=args.archived,
+    )
 
     if not tasks:
-        status_label = f" (статус: {args.status})" if status_filter else ""
-        print(f"Нет задач{status_label}.")
+        filters = []
+        if args.status:
+            filters.append(f"статус: {args.status}")
+        if args.kind:
+            filters.append(f"тип: {args.kind}")
+        filter_str = f" ({'; '.join(filters)})" if filters else ""
+        print(f"Нет задач{filter_str}.")
         return 0
 
-    # Column widths for alignment
+    # Column widths
     max_id_len = max(len(t.id) for t in tasks)
-    status_width = 8
+    status_width = 10
+    kind_width = 6
 
     for task in tasks:
-        # Compute total time across all sessions for this task
         total_seconds = 0
         with repo.conn() as conn:
             rows = conn.execute(
@@ -132,9 +140,10 @@ def cmd_list(args: argparse.Namespace) -> int:
 
         time_str = fmt_seconds(total_seconds)
         status_display = _translate_status(task.status)
+        kind_display = task.kind[:3] if task.kind else " — "
         name_display = task.name if task.name and task.name != task.id else ""
 
-        line = f"{task.id:<{max_id_len}}  {status_display:<{status_width}}  {time_str:>6}"
+        line = f"{task.id:<{max_id_len}}  {kind_display:<{kind_width}}  {status_display:<{status_width}}  {time_str:>6}"
         if name_display:
             line += f"   {name_display}"
         print(line)
@@ -198,9 +207,13 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 def _translate_status(status: str) -> str:
     """Translate a task status code into a human-readable label."""
     mapping = {
-        "active": "Active",
-        "done": "Done",
-        "paused": "Paused",
-        "archived": "Archived",
+        "draft":     "Черновик",
+        "active":    "В работе",
+        "blocked":   "Заблок.",
+        "review":    "Ревью",
+        "delivery":  "Доставка",
+        "done":      "Заверш.",
+        "archived":  "Архив",
+        "cancelled": "Отмен.",
     }
     return mapping.get(status, status.capitalize())

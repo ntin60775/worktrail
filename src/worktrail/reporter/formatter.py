@@ -49,14 +49,17 @@ class ReportItem:
         task_name: Human-readable task name.
         total_hours: Sum of all block hours for this task.
         blocks: Grouped checkpoint blocks.
-        status: Task status in Russian ('в работе', 'завершена', etc.).
+        status: Task status in Russian.
+        journal_entries: Optional list of journal entry dicts with keys
+            kind, title, body, created_at.
     """
-
     task_id: str
     task_name: str
     total_hours: float
     blocks: list[Block]
     status: str
+    journal_entries: list[dict] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

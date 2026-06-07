@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from worktrail.core.db import get_connection, get_db_path
-from worktrail.core.models import Checkpoint, Session, Task
+from worktrail.core.models import Checkpoint, JournalEntry, Session, Task
 
 
 class Repository:
@@ -51,13 +51,24 @@ class Repository:
     # Task operations
     # ------------------------------------------------------------------
 
-    def create_task(self, task_id: str, name: str, parent_id: Optional[str] = None) -> Task:
+    def create_task(
+        self,
+        task_id: str,
+        name: str,
+        parent_id: Optional[str] = None,
+        kind: str = "task",
+        branch: Optional[str] = None,
+        status: str = "draft",
+    ) -> Task:
         """Insert a new task and return the created instance.
 
         Args:
             task_id: Unique task identifier.
             name: Human-readable task name.
             parent_id: Optional parent task reference.
+            kind: Task kind — 'task', 'exploration', or 'initiative'.
+            branch: Optional git branch name.
+            status: Initial status (default 'draft').
 
         Returns:
             The newly created :class:`Task`.
@@ -66,7 +77,9 @@ class Repository:
         task = Task(
             id=task_id,
             name=name,
-            status="active",
+            status=status,
+            kind=kind,
+            branch=branch,
             created_at=now,
             updated_at=now,
             parent_id=parent_id,
@@ -74,10 +87,11 @@ class Repository:
         with self.conn() as conn:
             conn.execute(
                 """
-                INSERT INTO tasks (id, name, status, parent_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks (id, name, status, kind, branch, parent_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (task.id, task.name, task.status, task.parent_id, task.created_at, task.updated_at),
+                (task.id, task.name, task.status, task.kind, task.branch,
+                 task.parent_id, task.created_at, task.updated_at),
             )
             conn.commit()
         return task
@@ -101,6 +115,8 @@ class Repository:
             id=row["id"],
             name=row["name"],
             status=row["status"],
+            kind=row["kind"] if "kind" in row.keys() else "task",
+            branch=row["branch"] if "branch" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             parent_id=row["parent_id"],
@@ -125,30 +141,52 @@ class Repository:
             conn.commit()
         return cur.rowcount > 0
 
-    def list_tasks(self, status: Optional[str] = None) -> List[Task]:
-        """Return all tasks, optionally filtered by status.
+    def list_tasks(
+        self,
+        status: Optional[str] = None,
+        kind: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        include_archived: bool = False,
+    ) -> List[Task]:
+        """Return all tasks, optionally filtered.
 
         Args:
             status: If provided, only tasks with this status are returned.
+            kind: Filter by task kind ('task', 'exploration', 'initiative').
+            parent_id: Filter by parent task.
+            include_archived: Include archived tasks (excluded by default).
 
         Returns:
             List of :class:`Task` instances.
         """
+        conditions = []
+        params: list = []
+        if not include_archived:
+            conditions.append("status != 'archived'")
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if kind:
+            conditions.append("kind = ?")
+            params.append(kind)
+        if parent_id is not None:
+            conditions.append("parent_id = ?")
+            params.append(parent_id)
+
+        query = "SELECT * FROM tasks"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY created_at"
+
         with self.conn() as conn:
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM tasks WHERE status = ? ORDER BY created_at",
-                    (status,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM tasks ORDER BY created_at"
-                ).fetchall()
+            rows = conn.execute(query, params).fetchall()
         return [
             Task(
                 id=r["id"],
                 name=r["name"],
                 status=r["status"],
+                kind=r["kind"] if "kind" in r.keys() else "task",
+                branch=r["branch"] if "branch" in r.keys() else None,
                 created_at=r["created_at"],
                 updated_at=r["updated_at"],
                 parent_id=r["parent_id"],
@@ -163,6 +201,136 @@ class Repository:
             List of active :class:`Task` instances.
         """
         return self.list_tasks(status="active")
+
+    def get_subtasks(self, parent_id: str) -> List[Task]:
+        """Return all direct child tasks of *parent_id*.
+
+        Args:
+            parent_id: The parent task identifier.
+
+        Returns:
+            List of child :class:`Task` instances.
+        """
+        return self.list_tasks(parent_id=parent_id)
+
+    def get_initiative_tasks(self, initiative_id: str) -> List[Task]:
+        """Return all tasks belonging to an initiative.
+
+        An initiative is a task with ``kind='initiative'``; this returns
+        all tasks that have *initiative_id* as their parent.
+
+        Args:
+            initiative_id: The initiative task identifier.
+
+        Returns:
+            List of :class:`Task` instances in the initiative.
+        """
+        return self.get_subtasks(initiative_id)
+
+    def archive_task(self, task_id: str) -> bool:
+        """Archive a task (set status to ``'archived'``).
+
+        Args:
+            task_id: The task to archive.
+
+        Returns:
+            ``True`` if a row was updated, ``False`` otherwise.
+        """
+        return self.update_task_status(task_id, "archived")
+
+    # ------------------------------------------------------------------
+    # Journal operations
+    # ------------------------------------------------------------------
+
+    def add_journal_entry(
+        self,
+        task_id: str,
+        kind: str,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+    ) -> JournalEntry:
+        """Add a journal entry to a task.
+
+        Args:
+            task_id: The task to attach the entry to.
+            kind: Entry kind — 'proposal', 'design', 'spec', 'decision',
+                'note', or 'artifact'.
+            title: Optional short title.
+            body: Optional body text (Markdown).
+
+        Returns:
+            The newly created :class:`JournalEntry`.
+        """
+        now = self._now()
+        entry = JournalEntry(
+            task_id=task_id,
+            kind=kind,
+            title=title,
+            body=body,
+            created_at=now,
+            id=None,
+        )
+        with self.conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO journal (task_id, kind, title, body, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (entry.task_id, entry.kind, entry.title, entry.body, entry.created_at),
+            )
+            conn.commit()
+            entry.id = cur.lastrowid
+        return entry
+
+    def list_journal_entries(self, task_id: str) -> List[JournalEntry]:
+        """Return all journal entries for a task.
+
+        Args:
+            task_id: The task identifier.
+
+        Returns:
+            List of :class:`JournalEntry` instances ordered by created_at.
+        """
+        with self.conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM journal WHERE task_id = ? ORDER BY created_at",
+                (task_id,),
+            ).fetchall()
+        return [
+            JournalEntry(
+                id=r["id"],
+                task_id=r["task_id"],
+                kind=r["kind"],
+                title=r["title"],
+                body=r["body"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def get_journal_entry(self, entry_id: int) -> Optional[JournalEntry]:
+        """Fetch a single journal entry by its identifier.
+
+        Args:
+            entry_id: The journal entry identifier.
+
+        Returns:
+            The :class:`JournalEntry` if found, otherwise ``None``.
+        """
+        with self.conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM journal WHERE id = ?", (entry_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return JournalEntry(
+            id=row["id"],
+            task_id=row["task_id"],
+            kind=row["kind"],
+            title=row["title"],
+            body=row["body"],
+            created_at=row["created_at"],
+        )
 
     # ------------------------------------------------------------------
     # Session operations

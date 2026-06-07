@@ -232,6 +232,8 @@ class ReportGenerator:
     def generate_task_report(self, task_id: str) -> Report:
         """Generate a report for a specific task (all time).
 
+        Includes checkpoints, time totals, and journal entries.
+
         Args:
             task_id: The task identifier (e.g. 'TASK-001').
 
@@ -241,11 +243,11 @@ class ReportGenerator:
         Raises:
             ValueError: If the task does not exist in the database.
         """
-        task_info = self._get_task_info(task_id)
-        if task_info is None:
+        task = self._repo.get_task(task_id)
+        if task is None:
             raise ValueError(f"Задача {task_id} не найдена")
 
-        task_name, task_status = task_info
+        task_name, task_status = task.name, task.status
         sessions = self._get_sessions_for_task(task_id)
 
         sessions_with_checkpoints: list[tuple[Session, list[Checkpoint]]] = []
@@ -259,6 +261,25 @@ class ReportGenerator:
             task_status=task_status,
             sessions_with_checkpoints=sessions_with_checkpoints,
         )
+
+        # Fetch journal entries and attach to the report item
+        journal_entries = self._repo.list_journal_entries(task_id)
+        item.journal_entries = [
+            {
+                "kind": e.kind,
+                "title": e.title,
+                "body": e.body,
+                "created_at": e.created_at,
+            }
+            for e in journal_entries
+        ]
+
+        # Attach task metadata
+        item.metadata = {
+            "branch": task.branch,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+        }
 
         return Report(
             title=f"Отчёт по задаче {task_id}: {task_name}",

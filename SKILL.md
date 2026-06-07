@@ -80,11 +80,52 @@ worktrail report --today --save   # сохранить в .worktrail/reports/
 | `worktrail pause` | Ручная пауза |
 | `worktrail resume` | Продолжить после паузы |
 | `worktrail checkpoint "<msg>"` | Зафиксировать прогресс |
-| `worktrail status` | Текущая задача + elapsed time |
+| `worktrail status [<id> --set <s>]` | Текущая сессия / изменить статус |
+| `worktrail list [--status\|--kind\|--parent\|--archived]` | Список задач с фильтрами |
 | `worktrail report [--today\|--week\|--task\|--date]` | Отчёт |
-| `worktrail report --save` | Сохранить отчёт в `.worktrail/reports/` |
+| `worktrail report --task <id> --save` | Markdown-экспорт задачи с journal |
+| `worktrail journal <id> --kind ...` | Добавить запись в журнал задачи |
+| `worktrail journal list <id>` | Список записей журнала |
+| `worktrail journal show <id> <entry>` | Показать запись журнала |
+| `worktrail archive <id> [--force]` | Архивировать задачу |
+| `worktrail explore "<desc>" [--parent]` | Создать исследование |
+| `worktrail initiative "<name>"` | Создать инициативу |
+| `worktrail initiative list` | Список инициатив |
+| `worktrail initiative show <id>` | Показать инициативу |
 | `worktrail doctor` | Диагностика |
 
+
+## Статусы задач (8)
+
+| Статус | Когда использовать |
+|--------|-------------------|
+| `draft` | Задача создана, работа не начата |
+| `active` | В работе (tracker запущен) |
+| `blocked` | Заблокирована внешней зависимостью |
+| `review` | Код/решение на ревью |
+| `delivery` | Поставка заказчику / выгрузка |
+| `done` | Завершена |
+| `archived` | В архиве |
+| `cancelled` | Отменена |
+
+Изменение: `worktrail status TASK-001 --set review [--note "..."]`
+
+## Журнал задачи
+
+Типы записей (kind): `proposal`, `design`, `spec`, `decision`, `note`, `artifact`.
+
+**Когда использовать:**
+- `proposal` — почему делаем задачу
+- `design` — как будем делать, архитектурный подход
+- `spec` — инварианты (ADDED/MODIFIED/REMOVED)
+- `decision` — ключевое решение с обоснованием
+- `note` — свободная заметка, наблюдение
+- `artifact` — ссылка на файл/скриншот/лог
+
+**Правила:**
+- Journal — для знаний, не для времени
+- Не дублируй чекпоинты в journal
+- Одно ключевое решение = одна запись `decision`
 ## Отчётность
 
 Отчёт выводится на русском, без git-жаргона:

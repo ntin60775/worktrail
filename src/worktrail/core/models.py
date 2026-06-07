@@ -17,7 +17,10 @@ class Task:
     Attributes:
         id: Unique task identifier (e.g. 'TASK-2025-0042').
         name: Human-readable task name.
-        status: Task status — one of 'active', 'paused', 'done', 'archived'.
+        status: Task status — one of 'draft', 'active', 'blocked', 'review',
+            'delivery', 'done', 'archived', 'cancelled'.
+        kind: Task kind — 'task', 'exploration', or 'initiative'.
+        branch: Associated git branch name, if any.
         created_at: ISO8601 timestamp of creation (UTC).
         updated_at: ISO8601 timestamp of last update (UTC).
         parent_id: Optional parent task identifier for hierarchical tasks.
@@ -25,7 +28,9 @@ class Task:
 
     id: str
     name: str
-    status: str = "active"
+    status: str = "draft"
+    kind: str = "task"
+    branch: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     parent_id: Optional[str] = None
@@ -70,6 +75,28 @@ class Checkpoint:
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     source: str = "manual"
     commit_hash: Optional[str] = None
+    id: Optional[int] = None
+
+
+@dataclass
+class JournalEntry:
+    """Represents a journal entry attached to a task.
+
+    Attributes:
+        id: Auto-incremented journal entry identifier.
+        task_id: Reference to the task this entry belongs to.
+        kind: Entry kind — 'proposal', 'design', 'spec', 'decision',
+            'note', or 'artifact'.
+        title: Optional short title for the entry.
+        body: Optional body text (Markdown).
+        created_at: ISO8601 timestamp of creation (UTC).
+    """
+
+    task_id: str
+    kind: str
+    title: Optional[str] = None
+    body: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     id: Optional[int] = None
 
 

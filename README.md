@@ -77,9 +77,18 @@ worktrail report
 | `worktrail pause` | Pause the active session |
 | `worktrail resume` | Resume a paused session |
 | `worktrail checkpoint "<message>"` | Record a progress checkpoint |
-| `worktrail status` | Show current session, elapsed time, checkpoint count |
-| `worktrail list [--status active\|done\|all]` | List all tasks with time totals |
+| `worktrail status [<id> --set <s>]` | Show current session / change task status |
+| `worktrail list [--status\|--kind\|--parent\|--archived]` | List tasks with filters |
 | `worktrail report [--today\|--week\|--task\|--date]` | Generate a time report |
+| `worktrail report --task <id> --save` | Export full task report (Markdown) |
+| `worktrail journal <id> --kind ...` | Add a journal entry to a task |
+| `worktrail journal list <id>` | List journal entries for a task |
+| `worktrail journal show <id> <n>` | Show a specific journal entry |
+| `worktrail archive <id> [--force]` | Archive a task |
+| `worktrail explore "<desc>" [--parent]` | Create a lightweight exploration task |
+| `worktrail initiative "<name>"` | Create an initiative |
+| `worktrail initiative list` | List all initiatives |
+| `worktrail initiative show <id>` | Show initiative details and subtasks |
 | `worktrail migrate --from <path>` | Migrate from task-centric-knowledge v1 |
 | `worktrail uninstall` | Remove worktrail from the repo (asks confirmation) |
 | `worktrail doctor` | Diagnostics: hooks, schema, idle config |
@@ -99,6 +108,46 @@ worktrail start TASK-001 --name "API Integration"
 Branch naming convention (optional): `task/TASK-001-slug` or `du/DU-042`.
 Worktrail auto-detects the task ID when you switch branches.
 
+
+### Task Status (8 states)
+
+```
+draft → active → review → delivery → done → archived
+                ↘ blocked → active
+                         ↘ cancelled
+```
+
+| Status | Meaning |
+|--------|---------|
+| `draft` | Task created, work not started |
+| `active` | In progress (tracker running) |
+| `blocked` | Blocked by external dependency |
+| `review` | Under review |
+| `delivery` | Delivering to customer |
+| `done` | Completed |
+| `archived` | Archived |
+| `cancelled` | Cancelled |
+
+Change status: `worktrail status TASK-001 --set review`
+
+### Journal (task knowledge base)
+
+Each task can have journal entries of six kinds:
+
+| Kind | Purpose |
+|------|---------|
+| `proposal` | Why we do this task |
+| `design` | How we do it — architecture approach |
+| `spec` | Invariants (delta format: ADDED/MODIFIED/REMOVED) |
+| `decision` | Key decision with rationale |
+| `note` | Free-form observation |
+| `artifact` | Reference to a file/screenshot/log |
+
+```bash
+worktrail journal TASK-0037 --kind decision --title "Chose GUI stack" --body "..."
+worktrail journal list TASK-0037
+worktrail journal show TASK-0037 5
+```
 ---
 
 ## Reports

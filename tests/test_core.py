@@ -186,13 +186,13 @@ class TestTask:
         task = Task(id="TASK-001", name="Test Task")
         assert task.id == "TASK-001"
         assert task.name == "Test Task"
-        assert task.status == "active"
+        assert task.status == "draft"
         assert task.parent_id is None
 
     def test_default_status_is_active(self) -> None:
         """Default status should be 'active'."""
         task = Task(id="TASK-002", name="Another Task")
-        assert task.status == "active"
+        assert task.status == "draft"
 
     def test_created_at_is_iso8601(self) -> None:
         """created_at should be a valid ISO8601 string."""
@@ -320,7 +320,7 @@ class TestCreateTask:
         assert fetched is not None
         assert fetched.id == created.id
         assert fetched.name == "My First Task"
-        assert fetched.status == "active"
+        assert fetched.status == "draft"
 
     def test_create_task_with_parent(self, repo: Repository) -> None:
         """create_task with parent_id stores the parent reference."""
@@ -356,7 +356,7 @@ class TestUpdateTaskStatus:
         repo.create_task("TASK-003", "Time Update Test")
         before = repo.get_task("TASK-003")
         assert before is not None
-        repo.update_task_status("TASK-003", "paused")
+        repo.update_task_status("TASK-003", "blocked")
         after = repo.get_task("TASK-003")
         assert after is not None
         assert after.updated_at != before.updated_at
@@ -380,6 +380,7 @@ class TestListTasks:
     def test_list_tasks_filters_by_status(self, repo: Repository) -> None:
         """list_tasks(status=...) filters to matching status only."""
         repo.create_task("T-001", "Active Task")
+        repo.update_task_status("T-001", "active")
         repo.create_task("T-002", "Done Task")
         repo.update_task_status("T-002", "done")
 
@@ -399,6 +400,7 @@ class TestListTasks:
     def test_list_active_tasks(self, repo: Repository) -> None:
         """list_active_tasks is a convenience wrapper for status='active'."""
         repo.create_task("T-001", "Active")
+        repo.update_task_status("T-001", "active")
         repo.create_task("T-002", "Done")
         repo.update_task_status("T-002", "done")
         active = repo.list_active_tasks()

@@ -20,8 +20,13 @@ _SCHEMA_SQL: str = """
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'active', 'blocked', 'review',
+                          'delivery', 'done', 'archived', 'cancelled')),
     parent_id TEXT REFERENCES tasks(id),
+    kind TEXT NOT NULL DEFAULT 'task'
+        CHECK (kind IN ('task', 'exploration', 'initiative')),
+    branch TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -43,6 +48,16 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     timestamp TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'manual',
     commit_hash TEXT
+);
+
+CREATE TABLE IF NOT EXISTS journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    kind TEXT NOT NULL
+        CHECK (kind IN ('proposal', 'design', 'spec', 'decision', 'note', 'artifact')),
+    title TEXT,
+    body TEXT,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS config (
@@ -91,8 +106,30 @@ def get_db_path(cwd: Optional[Path] = None) -> Path:
     )
 
 
+def migrate_schema(db_path: Path) -> None:
+    """Apply schema migrations for existing databases.
+
+    Detects the current schema version and applies any missing ALTER TABLE
+    statements to bring the database up to the latest version.  Safe to call
+    on a freshly-created database — it will be a no-op.
+
+    Args:
+        db_path: Path to the SQLite database file.
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+        if "kind" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'")
+        if "branch" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN branch TEXT")
+        conn.commit()
+
 def init_db(db_path: Path) -> None:
     """Create tables (if they do not already exist) in *db_path*.
+
+    After table creation, applies any pending schema migrations for
+    databases created with an older version of worktrail.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -101,6 +138,7 @@ def init_db(db_path: Path) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.executescript(_SCHEMA_SQL)
         conn.commit()
+    migrate_schema(db_path)
 
 
 def init_worktrail_dir(project_root: Path) -> Path:

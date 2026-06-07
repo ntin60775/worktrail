@@ -16,7 +16,7 @@ from worktrail import __version__
 from worktrail.cli.commands import get_aliases, get_commands, resolve_command
 
 # Auto-register all handlers via their @command decorators
-from worktrail.cli.handlers import migrate, report, system, task  # noqa: F401
+from worktrail.cli.handlers import archive, explore, initiative, journal, migrate, report, system, task  # noqa: F401
 
 
 def _build_parser() -> argparse.ArgumentParser:

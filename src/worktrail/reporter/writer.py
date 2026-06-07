@@ -109,16 +109,73 @@ def render_markdown(report: Report) -> str:
         lines.append(f"## {item.task_id}: {item.task_name}")
         lines.append("")
 
-        # Blocks as bullet list
-        for block in item.blocks:
-            lines.append(f"- **[{_format_hours(block.hours)}]** {block.description}")
+        # Metadata (branch, dates) for task reports
+        if item.metadata:
+            meta = item.metadata
+            meta_parts = []
+            if meta.get("branch"):
+                meta_parts.append(f"**Ветка:** {meta['branch']}")
+            if meta.get("created_at"):
+                meta_parts.append(f"**Создана:** {meta['created_at'][:10]}")
+            if meta.get("updated_at"):
+                meta_parts.append(f"**Обновлена:** {meta['updated_at'][:10]}")
+            status_line = f"**Статус:** {item.status}"
+            if meta_parts:
+                status_line += " | " + " | ".join(meta_parts)
+            lines.append(status_line)
+            lines.append(f"**Общее время:** {_format_hours(item.total_hours)}")
+            lines.append("")
+        else:
+            lines.append("")
 
-        lines.append("")
-        lines.append(
-            f"**Итого:** {_format_hours(item.total_hours)} | "
-            f"**Статус:** {item.status}"
-        )
-        lines.append("")
+        # Checkpoint blocks
+        if item.blocks:
+            lines.append("## Чекпоинты")
+            lines.append("")
+            for block in item.blocks:
+                lines.append(f"- **[{_format_hours(block.hours)}]** {block.description}")
+            lines.append("")
+
+        # Summary
+        if not item.metadata:
+            lines.append(
+                f"**Итого:** {_format_hours(item.total_hours)} | "
+                f"**Статус:** {item.status}"
+            )
+            lines.append("")
+
+        # Journal entries
+        if item.journal_entries:
+            lines.append("## Журнал")
+            lines.append("")
+            # Group by kind
+            kinds_order = ["proposal", "design", "spec", "decision", "note", "artifact"]
+            kind_labels = {
+                "proposal": "proposal",
+                "design": "design",
+                "spec": "spec",
+                "decision": "decision",
+                "note": "note",
+                "artifact": "artifact",
+            }
+            for kind in kinds_order:
+                entries = [e for e in item.journal_entries if e["kind"] == kind]
+                if entries:
+                    lines.append(f"### [{kind}]")
+                    lines.append("")
+                    for e in entries:
+                        title = e.get("title") or ""
+                        body_text = e.get("body") or ""
+                        if title:
+                            lines.append(f"**{title}**")
+                            lines.append("")
+                        if body_text:
+                            lines.append(body_text)
+                            lines.append("")
+                        if not title and not body_text:
+                            lines.append(f"*{e.get('created_at', '')}*")
+                            lines.append("")
+                    lines.append("")
 
     # Grand total
     lines.append("---")

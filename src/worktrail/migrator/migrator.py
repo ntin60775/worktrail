@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -46,6 +47,7 @@ class MigrationReport:
         tasks_migrated: Number of tasks inserted into the database.
         sessions_created: Number of sessions created from worklog entries.
         checkpoints_created: Number of checkpoints created from worklog entries.
+        journal_entries_created: Number of journal entries imported.
         migration_branch: The git branch used for the migration.
         merge_command: Shell command to merge the migration branch into main.
         migration_commit_hash: Hash of the migration commit (if available).
@@ -56,6 +58,7 @@ class MigrationReport:
     tasks_migrated: int = 0
     sessions_created: int = 0
     checkpoints_created: int = 0
+    journal_entries_created: int = 0
     migration_branch: str = "worktrail/migrate-v1"
     merge_command: str = "git checkout main && git merge worktrail/migrate-v1 --no-ff"
     migration_commit_hash: Optional[str] = None
@@ -71,6 +74,7 @@ class MigrationReport:
             f"- Задач мигрировано: {self.tasks_migrated}",
             f"- Сессий создано: {self.sessions_created}",
             f"- Чекпоинтов создано: {self.checkpoints_created}",
+            f"- Записей журнала: {self.journal_entries_created}",
             "",
             "## Сопоставление ID",
             "| Старый ID | Имя задачи | Новый статус |",
@@ -81,7 +85,6 @@ class MigrationReport:
             name = mapping.get("name", "")
             status = mapping.get("new_status", "")
             lines.append(f"| {task_id} | {name} | {status} |")
-
         lines.extend([
             "",
             "## Откат",
@@ -310,14 +313,13 @@ class Migrator:
                         task_id=task_id,
                         name=task_name,
                         parent_id=parsed.get("parent_id"),
+                        branch=parsed.get("branch"),
                     )
-                    if task_status != "active":
+                    if task_status != "draft":
                         self._repo.update_task_status(task_id, task_status)
                 else:
                     # Update existing task status if needed
                     self._repo.update_task_status(task_id, task_status)
-
-                self._report.tasks_migrated += 1
                 self._report.task_mapping.append({
                     "old_id": task_id,
                     "name": task_name,
@@ -334,6 +336,8 @@ class Migrator:
             worklog_path = task_md_path.parent / "worklog.md"
             self._migrate_worklog(task_id, worklog_path)
 
+            # Import knowledge files as journal entries
+            self._migrate_journal(task_id, task_md_path.parent)
     def _migrate_worklog(self, task_id: str, worklog_path: Path) -> None:
         """Parse a worklog and create sessions + checkpoints.
 
@@ -431,9 +435,100 @@ class Migrator:
                 msg = f"Failed to migrate worklog for {task_id} on {entry_date}: {exc}"
                 logger.warning(msg)
                 self._report.errors.append(msg)
+    def _migrate_journal(self, task_id: str, task_dir: Path) -> None:
+        """Import knowledge files from *task_dir* as journal entries.
+
+        Looks for:
+        - ``sdd.md`` / ``sdd.json`` → kind='spec'
+        - ``decisions.md`` → kind='decision'
+        - ``plan.md`` → kind='design'
+        - ``task.md`` description section → kind='proposal'
+
+        Args:
+            task_id: The task identifier to associate entries with.
+            task_dir: Directory containing the knowledge files.
+        """
+        if self._repo is None:
+            return
+
+        # sdd.md / sdd.json → spec
+
+        # sdd.md / sdd.json → spec
+        for sdd_name in ("sdd.md", "sdd.json"):
+            sdd_path = task_dir / sdd_name
+            if sdd_path.is_file():
+                try:
+                    body = sdd_path.read_text(encoding="utf-8")
+                    self._repo.add_journal_entry(
+                        task_id=task_id,
+                        kind="spec",
+                        title="Спецификация",
+                        body=body[:10000],
+                    )
+                    self._report.journal_entries_created += 1
+                except Exception:
+                    pass
+                break
+        # decisions.md → decision entries
+        decisions_path = task_dir / "decisions.md"
+        if decisions_path.is_file():
+            try:
+                content = decisions_path.read_text(encoding="utf-8")
+                # Split by ## headers for individual decisions
+                sections = re.split(r"\n## ", content)
+                for section in sections:
+                    section = section.strip()
+                    if not section:
+                        continue
+                    lines = section.split("\n", 1)
+                    title = lines[0].lstrip("# ").strip()
+                    body_text = lines[1].strip() if len(lines) > 1 else ""
+                    self._repo.add_journal_entry(
+                        task_id=task_id,
+                        kind="decision",
+                        title=title,
+                        body=body_text[:10000],
+                    )
+                    self._report.journal_entries_created += 1
+            except Exception:
+                pass
+
+        # plan.md → design
+        plan_path = task_dir / "plan.md"
+        if plan_path.is_file():
+            try:
+                body = plan_path.read_text(encoding="utf-8")
+                self._repo.add_journal_entry(
+                    task_id=task_id,
+                    kind="design",
+                    title="План реализации",
+                    body=body[:10000],
+                )
+                self._report.journal_entries_created += 1
+            except Exception:
+                pass
+
+        # task.md description section → proposal
+        task_md_path = task_dir / "task.md"
+        if task_md_path.is_file():
+            try:
+                content = task_md_path.read_text(encoding="utf-8")
+                # Extract ## Описание section
+                m = re.search(r"## Описание\s*\n+(.*?)(?=\n## |\Z)", content, re.DOTALL)
+                if m:
+                    body = m.group(1).strip()
+                    if body and len(body) > 10:
+                        self._repo.add_journal_entry(
+                            task_id=task_id,
+                            kind="proposal",
+                            title="Описание задачи",
+                            body=body[:10000],
+                        )
+                        self._report.journal_entries_created += 1
+            except Exception:
+                pass
 
     def _install_hooks(self) -> None:
-        """Install git hooks via :func:`worktrail.git_bridge.install_hooks`."""
         try:
             success = install_hooks(self.project_root)
             if success:
