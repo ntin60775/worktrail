@@ -524,8 +524,11 @@ class TestHelperFunctions:
 
     def test_translate_status(self) -> None:
         """_translate_status should map status codes to Russian."""
+        assert _translate_status("draft") == "черновик"
         assert _translate_status("active") == "в работе"
+        assert _translate_status("blocked") == "заблокирована"
+        assert _translate_status("review") == "на проверке"
         assert _translate_status("done") == "завершена"
-        assert _translate_status("paused") == "на паузе"
         assert _translate_status("archived") == "в архиве"
+        assert _translate_status("cancelled") == "отменена"
         assert _translate_status("unknown") == "unknown"

@@ -131,7 +131,7 @@ class TestParseV1TaskFrontmatter:
 
         assert result["id"] == "TASK-003"
         assert result["name"] == "Table Task"
-        assert result["status"] == "paused"
+        assert result["status"] == "blocked"
         assert result["branch"] == "feature/tab"
 
     def test_task_without_frontmatter_uses_heading(self) -> None:
@@ -174,8 +174,8 @@ class TestParseV1TaskRussianStatus:
             ("активна", "active"),
             ("активный", "active"),
             ("начата", "active"),
-            ("пауза", "paused"),
-            ("приостановлена", "paused"),
+            ("пауза", "blocked"),
+            ("приостановлена", "blocked"),
             ("завершена", "done"),
             ("готово", "done"),
             ("выполнена", "done"),
@@ -203,7 +203,6 @@ class TestParseV1TaskRussianStatus:
             result = parse_v1_task(task_md)
 
         assert result["status"] == expected
-
 
 # ============================================================================
 # parse_v1_worklog
@@ -647,16 +646,16 @@ class TestNormaliseStatus:
             ("active", "active"),
             ("in progress", "active"),
             ("started", "active"),
-            ("paused", "paused"),
-            ("on hold", "paused"),
+            ("paused", "blocked"),
+            ("on hold", "blocked"),
             ("done", "done"),
             ("completed", "done"),
             ("finished", "done"),
             ("closed", "done"),
             ("archived", "archived"),
-            (None, "active"),
-            ("", "active"),
-            ("unknown_value", "active"),
+            (None, "draft"),
+            ("", "draft"),
+            ("unknown_value", "draft"),
         ],
     )
     def test_normalise_status(self, raw: str | None, expected: str) -> None:
