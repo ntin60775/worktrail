@@ -115,11 +115,9 @@ _STATUS_MAP: Dict[str, str] = {
     "archived": "archived",
 }
 
-# Regex to match ISO-like dates (YYYY-MM-DD)
+_VALID_ID_RE = re.compile(r"^TASK-\d+(-\d+)?((\.\d+)+)?$")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
-# Regex to validate task IDs — rejects non-TASK strings like 'СТАТУС'
-_VALID_ID_RE = re.compile(r"^TASK-\d+(-\d+)?(\.\d+)?$")
 
 # Regex for frontmatter delimiters
 _FRONTMATTER_RE = re.compile(
@@ -186,6 +184,10 @@ def _extract_task_id_from_path(task_md_path: Path) -> Optional[str]:
 def _parse_table(content: str) -> Dict[str, str]:
     """Extract key/value pairs from the first markdown table found.
 
+    Only the first table is parsed — subsequent tables are ignored.
+    The header row (before the ``|---|---|`` separator) is skipped.
+    For tables with >2 columns, only the first two are used (key, value).
+
     Args:
         content: Raw markdown text.
 
@@ -193,15 +195,76 @@ def _parse_table(content: str) -> Dict[str, str]:
         Dictionary of lower-cased keys to raw string values.
     """
     result: Dict[str, str] = {}
-    for line in content.splitlines():
-        # Skip header separators like |---|---|
-        if re.match(r"\s*\|[-:\|\s]+\|\s*", line):
+    lines = content.splitlines()
+    in_table = False
+    seen_separator = False
+    prev_line = ""
+    for line in lines:
+        stripped = line.strip()
+        # Detect separator row: |---|...|
+        is_sep = bool(re.match(r"\s*\|[-:\|\s]+\|\s*", stripped))
+        if is_sep:
+            seen_separator = True
+            in_table = True
             continue
-        match = _TABLE_ROW_RE.match(line.strip())
+        if not stripped.startswith("|"):
+            if in_table:
+                break  # table ended
+            continue
+        if not in_table:
+            continue
+        # Skip the header row (the line immediately before separator)
+        # We track prev_line for this
+        match = _TABLE_ROW_RE.match(stripped)
         if match:
             key = match.group(1).strip().lower()
             value = match.group(2).strip().strip('`')
             result[key] = value
+    return result
+
+
+def _parse_json_passport(content: str) -> Dict[str, Any]:
+    """Parse a v1 ``task.json`` passport file.
+
+    JSON keys are normalised to the same internal keys used by
+    ``_parse_table`` and ``_parse_frontmatter``.
+
+    Args:
+        content: Raw JSON text.
+
+    Returns:
+        Dictionary with normalised keys, or empty dict on parse error.
+    """
+    import json as _json
+    try:
+        data = _json.loads(content)
+    except (ValueError, _json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    result: Dict[str, Any] = {}
+    # Normalise camelCase and space-separated keys to lower_underscore
+    for key, value in data.items():
+        if value is None:
+            continue
+        norm = key.strip().lower().replace(" ", "_")
+        # Map common JSON key names to internal keys
+        if norm in ("id", "task_id", "taskid"):
+            result["id"] = str(value)
+        elif norm in ("name", "title", "task_name"):
+            result["name"] = str(value)
+        elif norm in ("status", "state"):
+            result["status"] = str(value)
+        elif norm in ("parentid", "parent_id", "parent"):
+            result["parent_id"] = str(value)
+        elif norm in ("branch", "git_branch"):
+            result["branch"] = str(value)
+        elif norm in ("createdat", "created_at", "created"):
+            result["created_at"] = value
+        elif norm in ("updatedat", "updated_at", "updated"):
+            result["updated_at"] = value
+        else:
+            result[norm] = value
     return result
 
 
@@ -308,17 +371,36 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
         FileNotFoundError: If *task_md_path* does not exist.
     """
     if not task_md_path.is_file():
+        # Try task.json in the same directory
+        json_path = task_md_path.parent / "task.json"
+        if json_path.is_file():
+            return _parse_v1_json_task(json_path)
         raise FileNotFoundError(f"Task file not found: {task_md_path}")
 
     content = task_md_path.read_text(encoding="utf-8")
 
-    # 1. Try frontmatter
-    raw_data = _parse_frontmatter(content)
+    return _extract_task_fields(task_md_path, content)
 
-    # 2. Fall back to table
-    if raw_data is None:
-        raw_data = _parse_table(content)
 
+def _parse_v1_json_task(json_path: Path) -> Dict[str, Any]:
+    """Parse a v1 ``task.json`` file and return extracted metadata."""
+    content = json_path.read_text(encoding="utf-8")
+    raw_data = _parse_json_passport(content)
+    return _extract_task_fields(json_path, raw_data)
+
+
+def _extract_task_fields(source_path: Path, source: Any) -> Dict[str, Any]:
+    """Extract task fields from already-parsed raw data or markdown content."""
+    if isinstance(source, dict):
+        raw_data = source
+        content = ""
+    else:
+        content = str(source)
+        # 1. Try frontmatter
+        raw_data = _parse_frontmatter(content)
+        # 2. Fall back to table
+        if raw_data is None:
+            raw_data = _parse_table(content)
     result: Dict[str, Any] = {"raw": raw_data}
 
     # --- ID ---
@@ -328,14 +410,14 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
             task_id = str(raw_data[key]).strip().upper()
             break
     if task_id is None:
-        task_id = _extract_task_id_from_path(task_md_path)
+        task_id = _extract_task_id_from_path(source_path)
     if task_id is None:
         raise ValueError(
-            f"Cannot determine task ID from {task_md_path}"
+            f"Cannot determine task ID from {source_path}"
         )
     if task_id and not _VALID_ID_RE.match(task_id):
         raise ValueError(
-            f"Invalid task ID format {task_id!r} from {task_md_path}; "
+            f"Invalid task ID format {task_id!r} from {source_path}; "
             f"expected TASK-NNN, TASK-NNN-NNNN, or TASK-NNN-NNNN.N"
         )
     result["id"] = task_id
@@ -350,7 +432,7 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
         name = _extract_name_from_content(content)
     if name is None:
         # Fallback: use directory name or task ID
-        name = task_md_path.parent.name
+        name = source_path.parent.name
     result["name"] = name
 
     # --- Status ---
@@ -378,7 +460,7 @@ def parse_v1_task(task_md_path: Path) -> Dict[str, Any]:
                 break
     if created_at is None:
         # Fallback: use file modification time
-        mtime = task_md_path.stat().st_mtime
+        mtime = source_path.stat().st_mtime
         created_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
     result["created_at"] = created_at
 
@@ -430,20 +512,61 @@ def parse_v1_worklog(worklog_path: Path) -> List[Dict[str, Any]]:
         return []
 
     content = worklog_path.read_text(encoding="utf-8")
-    entries: List[Dict[str, Any]] = []
 
+    # Try line-based format first (YYYY-MM-DD: message)
+    entries = _parse_worklog_lines(content)
+    if entries:
+        return entries
+
+    # Fall back to narrative format (## YYYY-MM-DD sections)
+    return _parse_worklog_narrative(content)
+
+
+def _parse_worklog_lines(content: str) -> List[Dict[str, Any]]:
+    """Parse line-based worklog: ``YYYY-MM-DD: message [2h]``."""
+    entries: List[Dict[str, Any]] = []
     for match in _WORKLOG_ENTRY_RE.finditer(content):
         entry_date = match.group(1)
         message = match.group(2).strip()
-
-        # Remove duration marker from message
         duration = _parse_duration(message)
         clean_message = _DURATION_RE.sub("", message).strip()
-
         entries.append({
             "date": entry_date,
             "message": clean_message,
             "duration_minutes": duration,
         })
+    return entries
 
+
+# Regex for narrative worklog: ## YYYY-MM-DD sections
+_WORKLOG_NARRATIVE_RE = re.compile(
+    r"^## (\d{4}-\d{2}-\d{2})\s*$(.*?)(?=^## |\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _parse_worklog_narrative(content: str) -> List[Dict[str, Any]]:
+    """Parse narrative worklog: ``## YYYY-MM-DD`` sections with text body.
+
+    Each section title (## YYYY-MM-DD) becomes a date.  The body text
+    of the section becomes the message.  Sub-headings (### ...) are kept.
+    """
+    entries: List[Dict[str, Any]] = []
+    for match in _WORKLOG_NARRATIVE_RE.finditer(content):
+        entry_date = match.group(1)
+        body = match.group(2).strip()
+        if not body:
+            continue
+        # Take first meaningful line as summary, rest as detail
+        lines = body.splitlines()
+        message = lines[0].lstrip("# ").strip() if lines else body[:200]
+        if len(body) > 500:
+            message = body[:500] + "…"
+        else:
+            message = body
+        entries.append({
+            "date": entry_date,
+            "message": message.strip(),
+            "duration_minutes": _parse_duration(body),
+        })
     return entries
