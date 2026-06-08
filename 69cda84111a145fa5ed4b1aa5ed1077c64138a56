@@ -4,9 +4,9 @@
     "name": "Переход на worktrail v2",
     "summary": "Переход на worktrail v2",
     "scope": "Полная реализация спецификации v2: Go-бинарь, git-notes, 21 CLI-команда, хуки, навык",
-    "status": "active",
+    "status": "review",
     "created_at": "2026-06-08T02:54:24.782540455+02:00",
-    "updated_at": "2026-06-08T02:58:59.054133417+02:00",
+    "updated_at": "2026-06-08T02:58:59.225028636+02:00",
     "branch": "main"
   },
   "decisions": [
@@ -55,5 +55,58 @@
       "timestamp": "2026-06-08T02:54:36.044605306+02:00",
       "summary": "Бутстрап: worktrail install глобально, doctor all_ok"
     }
-  ]
+  ],
+  "review_package": {
+    "task_id": "WT-001",
+    "status": "review",
+    "contract": {
+      "task_id": "WT-001",
+      "name": "Переход на worktrail v2",
+      "summary": "Переход на worktrail v2",
+      "scope": "Полная реализация спецификации v2: Go-бинарь, git-notes, 21 CLI-команда, хуки, навык",
+      "status": "review",
+      "created_at": "2026-06-08T02:54:24.782540455+02:00",
+      "updated_at": "2026-06-08T02:58:59.054133417+02:00",
+      "branch": "main"
+    },
+    "verification_summary": {
+      "total_runs": 0,
+      "final_run": {
+        "run": 0,
+        "method": "",
+        "timestamp": "0001-01-01T00:00:00Z",
+        "task_id": "",
+        "summary": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0
+        },
+        "failures": null
+      },
+      "vrr_log": ".worktrail/WT-001/vrr.jsonl"
+    },
+    "decisions": [
+      {
+        "id": "D1",
+        "task_id": "WT-001",
+        "title": "git-notes вместо SQLite",
+        "rationale": "Каноническое хранилище в git, zero-setup, иммутабельность. SQLite v1 несовместим по модели данных.",
+        "alternatives": [
+          "Оставить SQLite — отказ: миграция сложнее, две системы хранения",
+          "Файлы markdown — отказ: нет транзакционности, сложный парсинг"
+        ],
+        "created_at": "2026-06-08T02:54:36.209350659+02:00"
+      },
+      {
+        "id": "D2",
+        "task_id": "WT-001",
+        "title": "Go stdlib only",
+        "rationale": "Нулевые внешние зависимости, один бинарник, простая установка. Для CLI и git-операций stdlib достаточно.",
+        "created_at": "2026-06-08T02:54:36.374948923+02:00"
+      }
+    ],
+    "boundaries": {
+      "changed_files": null
+    }
+  }
 }
