@@ -48,36 +48,49 @@ func Diagnose() (map[string]interface{}, error) {
 		allOk = false
 	}
 
-	report["all_ok"] = allOk
+	// 5. Binary in PATH
+	binPath, binOk := checkBinaryPath()
+	report["binary_in_path"] = binOk
+	if binPath != "" {
+		report["binary_path"] = binPath
+	}
+	if !binOk {
+		allOk = false
+	}
 
+	// 6. ~/.local/bin in PATH
+	localBinOk := checkLocalBinInPath()
+	report["local_bin_in_path"] = localBinOk
+	if !localBinOk {
+		allOk = false
+	}
+
+	// 7. Binary installed and executable
+	binInstalled, installedPath := checkBinaryInstalled()
+	report["binary_installed"] = binInstalled
+	if installedPath != "" {
+		report["binary_install_path"] = installedPath
+	}
+	if !binInstalled {
+		allOk = false
+	}
+
+	report["all_ok"] = allOk
 	return report, nil
 }
 
-// checkGit verifies git is available in PATH.
 func checkGit() bool {
 	_, err := exec.LookPath("git")
 	if err != nil {
 		return false
 	}
-	cmd := exec.Command("git", "--version")
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return true
+	return exec.Command("git", "--version").Run() == nil
 }
 
-// checkNotesNamespace verifies the worktrail git-notes ref exists.
 func checkNotesNamespace() bool {
-	cmd := exec.Command("git", "notes", "--ref", "refs/notes/worktrail", "list")
-	// This command succeeds even if the ref is empty (no notes yet),
-	// but fails if git-notes isn't configured or the repo is broken.
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return true
+	return exec.Command("git", "notes", "--ref", "refs/notes/worktrail", "list").Run() == nil
 }
 
-// checkHooksInstalled checks if git global core.hooksPath is configured.
 func checkHooksInstalled() (bool, string) {
 	cmd := exec.Command("git", "config", "--global", "core.hooksPath")
 	out, err := cmd.Output()
@@ -88,11 +101,9 @@ func checkHooksInstalled() (bool, string) {
 	if path == "" {
 		return false, ""
 	}
-	// Verify the hooks directory exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, path
 	}
-	// Verify it contains at least one hook
 	entries, err := os.ReadDir(path)
 	if err != nil || len(entries) == 0 {
 		return false, path
@@ -100,7 +111,6 @@ func checkHooksInstalled() (bool, string) {
 	return true, path
 }
 
-// checkSkillDir checks if the worktrail skill is installed.
 func checkSkillDir() (bool, string) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -111,4 +121,39 @@ func checkSkillDir() (bool, string) {
 		return false, skillPath
 	}
 	return true, skillPath
+}
+
+func checkBinaryPath() (string, bool) {
+	p, err := exec.LookPath("worktrail")
+	if err != nil {
+		return "", false
+	}
+	return p, true
+}
+
+func checkLocalBinInPath() bool {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	binDir := filepath.Join(homeDir, ".local", "bin")
+	for _, p := range strings.Split(os.Getenv("PATH"), ":") {
+		if p == binDir {
+			return true
+		}
+	}
+	return false
+}
+
+func checkBinaryInstalled() (bool, string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false, ""
+	}
+	binPath := filepath.Join(homeDir, ".local", "bin", "worktrail")
+	info, err := os.Stat(binPath)
+	if err != nil {
+		return false, binPath
+	}
+	return info.Mode()&0111 != 0, binPath
 }
