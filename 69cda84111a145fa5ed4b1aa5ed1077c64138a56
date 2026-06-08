@@ -67,6 +67,21 @@
       "created_at": "2026-06-08T02:54:36.374948923+02:00"
     }
   ],
+  "specs": [
+    {
+      "id": "S1",
+      "task_id": "WT-001",
+      "scope": "gitnotes",
+      "invariants": [
+        "Якорный коммит уникален для каждой задачи",
+        "Тег worktrail/\u003cid\u003e указывает на якорь",
+        "Все notes висят на якорном коммите",
+        "sanitizeTag детерминирован и не даёт коллизий"
+      ],
+      "file": "internal/gitnotes/gitnotes.go",
+      "created_at": "2026-06-08T09:47:18.979303359+02:00"
+    }
+  ],
   "progress": [
     {
       "task_id": "WT-001",
