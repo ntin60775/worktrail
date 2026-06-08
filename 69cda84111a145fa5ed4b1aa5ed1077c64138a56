@@ -108,5 +108,45 @@
     "boundaries": {
       "changed_files": null
     }
+  },
+  "review_result": {
+    "task_id": "WT-001",
+    "verdict": "accepted",
+    "timestamp": "2026-06-08T02:59:00+02:00",
+    "experts": [
+      {
+        "expert": "contract-auditor",
+        "verdict": "pass",
+        "warnings": [
+          {
+            "id": "W1",
+            "title": "Профиль не детектит Go без tests/",
+            "problem": "detectProfile() проверяет os.Stat(\"tests\") — после удаления Python-тестов каталога нет. Go-проект определяется как generic вместо code. Нужно проверять *_test.go или наличие .go файлов."
+          },
+          {
+            "id": "W2",
+            "title": "Нет адаптера go_test для verify run",
+            "problem": "Есть pytest, shell, manual, none — но для Go-проектов естественный адаптер go_test отсутствует. Приходится использовать shell: go test ./..."
+          },
+          {
+            "id": "W3",
+            "title": "Контракт без явных success_criteria",
+            "problem": "Scope содержит описание текстом, но нет структурированных критериев с ID. Агенту не на что ссылаться при verify."
+          },
+          {
+            "id": "W4",
+            "title": "Нет тестов в проекте",
+            "problem": "0 строк тестового кода. 3809 строк продакшн-кода без тестов — хрупкость при рефакторинге."
+          }
+        ],
+        "details": [
+          {
+            "criteria_id": "scope",
+            "status": "covered",
+            "evidence": "Бинарь собирается (ELF x86-64), 21 CLI-команда в help, git-notes refs/notes/worktrail активен, 3 хука установлены глобально, SKILL.md в ~/.agents/skills/worktrail/, doctor all_ok: true"
+          }
+        ]
+      }
+    ]
   }
 }
