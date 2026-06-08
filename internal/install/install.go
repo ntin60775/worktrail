@@ -81,6 +81,30 @@ func Install(dryRun bool) (string, error) {
 		fmt.Fprintf(&b, "✓ Copied SKILL.md to `%s`\n", skillPath)
 	}
 
+	// 4. Install binary to ~/.local/bin/
+	fmt.Fprintf(&b, "\n## Binary\n\n")
+	binDir := filepath.Join(homeDir, ".local", "bin")
+	binPath := filepath.Join(binDir, "worktrail")
+	builtBinary := filepath.Join(repoRoot, "worktrail")
+
+	if _, err := os.Stat(builtBinary); os.IsNotExist(err) {
+		fmt.Fprintf(&b, "⚠ Binary not found at %s — run 'make build' first\n", builtBinary)
+	} else if dryRun {
+		fmt.Fprintf(&b, "[dry-run] Would copy `%s` → `%s`\n", builtBinary, binPath)
+	} else {
+		if err := os.MkdirAll(binDir, 0o755); err != nil {
+			return "", fmt.Errorf("create bin dir: %w", err)
+		}
+		data, err := os.ReadFile(builtBinary)
+		if err != nil {
+			return "", fmt.Errorf("read binary: %w", err)
+		}
+		if err := os.WriteFile(binPath, data, 0o755); err != nil {
+			return "", fmt.Errorf("write binary: %w", err)
+		}
+		fmt.Fprintf(&b, "✓ Installed binary to `%s`\n", binPath)
+	}
+
 	return b.String(), nil
 }
 
