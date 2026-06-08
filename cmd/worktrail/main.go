@@ -338,10 +338,15 @@ func handleDecisionList(args []string) (interface{}, error) {
 	_ = f.Parse(args)
 
 	if *taskID == "" {
-		f.Usage()
-		os.Exit(1)
+		ctx, err := context.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if !ctx.HasTask {
+			return nil, fmt.Errorf("no task in current context — specify --task-id")
+		}
+		*taskID = ctx.TaskID
 	}
-
 	decisions, err := executor.ListDecisions(*taskID)
 	if err != nil {
 		return nil, err
@@ -434,13 +439,19 @@ func handleSpecList(args []string) (interface{}, error) {
 	jsonFlag := f.Bool("json", false, "output as JSON")
 	taskID := f.String("task-id", "", "task id")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail spec list --task-id <id> [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail spec list [--task-id <id>] [--json]\n")
 	}
 	_ = f.Parse(args)
 
 	if *taskID == "" {
-		f.Usage()
-		os.Exit(1)
+		ctx, err := context.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if !ctx.HasTask {
+			return nil, fmt.Errorf("no task in current context — specify --task-id")
+		}
+		*taskID = ctx.TaskID
 	}
 
 	specs, err := executor.ListSpecs(*taskID)
@@ -529,8 +540,14 @@ func handleProgressList(args []string) (interface{}, error) {
 	_ = f.Parse(args)
 
 	if *taskID == "" {
-		f.Usage()
-		os.Exit(1)
+		ctx, err := context.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if !ctx.HasTask {
+			return nil, fmt.Errorf("no task in current context — specify --task-id")
+		}
+		*taskID = ctx.TaskID
 	}
 
 	entries, err := executor.ListProgress(*taskID, *last)
