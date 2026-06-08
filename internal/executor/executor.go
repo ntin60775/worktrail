@@ -3,19 +3,16 @@
 package executor
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 
 	"worktrail/internal/context"
 	"worktrail/internal/gitnotes"
-	wtime "worktrail/internal/time"
 	"worktrail/internal/types"
+	"worktrail/internal/verify"
 )
 
 // ErrNoTask is returned when the current context has no active task.
@@ -256,9 +253,6 @@ func Finalize(taskID string, skipReview bool) (*types.ReviewPackage, error) {
 
 	contract.UpdatedAt = time.Now()
 
-	// Derive work duration and update contract.
-	_, _ = wtime.Derive(tid)
-
 	note.Contract = contract
 
 	if err := gitnotes.Write(anchor, note); err != nil {
@@ -275,8 +269,7 @@ func diffFiles(anchor string) ([]string, error) {
 	cmd := exec.Command("git", "diff", anchor+"..HEAD", "--name-only")
 	out, err := cmd.Output()
 	if err != nil {
-		// If the range is empty or invalid, return empty list.
-		return nil, nil
+		return nil, fmt.Errorf("git diff: %w", err)
 	}
 	if len(out) == 0 {
 		return nil, nil
@@ -285,34 +278,18 @@ func diffFiles(anchor string) ([]string, error) {
 	return lines, nil
 }
 
-// readLastVRR reads the VRR JSONL file for a task and returns the last entry
-// and the total number of entries. If the file doesn't exist or is empty,
-// both return values are zero.
+// readLastVRR reads the VRR JSONL log and returns the last entry and total count.
+// It delegates to verify.ReadVRRLog so the path always matches the writer.
 func readLastVRR(taskID string) (*types.VRR, int) {
-	path := filepath.Join(gitnotes.WorktrailDir, taskID, "vrr.jsonl")
-	f, err := os.Open(path)
+	entries, err := verify.ReadVRRLog(taskID)
 	if err != nil {
 		return nil, 0
 	}
-	defer f.Close()
-
-	var last *types.VRR
-	count := 0
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var v types.VRR
-		if err := json.Unmarshal(line, &v); err != nil {
-			continue
-		}
-		count++
-		last = &v
+	if len(entries) == 0 {
+		return nil, 0
 	}
-
-	return last, count
+	last := entries[len(entries)-1]
+	return &last, len(entries)
 }
 
 // splitLines splits text into lines, trimming trailing empty entries.

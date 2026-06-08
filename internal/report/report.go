@@ -115,7 +115,7 @@ func BuildReport(taskID string) (string, error) {
 		fmt.Fprintf(&b, "## Progress Timeline\n\n")
 		for _, p := range note.Progress {
 			commit := ""
-			if p.Commit != "" {
+			if p.Commit != "" && len(p.Commit) >= 8 {
 				commit = fmt.Sprintf(" [`%s`]", p.Commit[:8])
 			}
 			fmt.Fprintf(&b, "- %s — %s%s\n",

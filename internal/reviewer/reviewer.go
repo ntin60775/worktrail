@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"worktrail/internal/gitnotes"
+	"worktrail/internal/contract"
 	"worktrail/internal/types"
 )
 
@@ -128,13 +129,20 @@ func ReviewResult(taskID, verdict, resultFile string) (*types.ReviewResult, erro
 
 	// Update contract status based on verdict.
 	if note.Contract != nil {
+		var targetStatus string
 		switch rr.Verdict {
 		case "accepted":
-			note.Contract.Status = "done"
-			note.Contract.UpdatedAt = time.Now()
+			targetStatus = "done"
 		case "rejected":
-			note.Contract.Status = "active"
-			note.Contract.UpdatedAt = time.Now()
+			targetStatus = "active"
+		}
+		if targetStatus != "" {
+			if err := contract.ValidateTransition(note.Contract.Status, targetStatus); err != nil {
+				fmt.Fprintf(os.Stderr, "worktrail reviewer: %s: %v\n", taskID, err)
+			} else {
+				note.Contract.Status = targetStatus
+				note.Contract.UpdatedAt = time.Now()
+			}
 		}
 	}
 

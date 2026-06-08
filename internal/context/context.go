@@ -81,11 +81,7 @@ func extractTaskID(branch string) string {
 func resolveByTaskID(taskID, branch string) (*types.ContextOutput, error) {
 	note, anchor, err := gitnotes.ReadByTask(taskID)
 	if err != nil {
-		return &types.ContextOutput{
-			TaskID:  taskID,
-			Branch:  branch,
-			HasTask: false,
-		}, nil
+		return nil, fmt.Errorf("read task %s: %w", taskID, err)
 	}
 	if note.Contract == nil {
 		return &types.ContextOutput{

@@ -17,33 +17,47 @@ const WorktrailDir = ".worktrail"
 
 // ─── Anchor commit ──────────────────────────────────────────────────────────
 
-// AnchorCommit finds or creates the anchor commit for a task.
-// If a tag worktrail/<taskID> exists, returns its target commit.
-// For new tasks, creates an empty anchor commit and tags it.
+// AnchorCommit returns the anchor commit hash for a task.
+// If a tag worktrail/<sanitizedID> exists, returns its target commit.
+// Otherwise returns HEAD without side effects.
+// This is a READ-ONLY function — it never creates commits or tags.
 func AnchorCommit(taskID string) (string, error) {
 	tag := TagPrefix + sanitizeTag(taskID)
 
-	// Check if tag already exists
 	out, err := git("rev-list", "-n", "1", "refs/tags/"+tag)
 	if err == nil && strings.TrimSpace(out) != "" {
 		return strings.TrimSpace(out), nil
 	}
 
-	// No existing tag — create a unique anchor commit for this task.
-	// Use an empty commit to avoid sharing anchor with other tasks on HEAD.
-	commitMsg := fmt.Sprintf("worktrail: anchor for %s", taskID)
-	_, err = git("commit", "--allow-empty", "-m", commitMsg)
-	if err != nil {
-		return "", fmt.Errorf("create anchor commit: %w", err)
-	}
 	return HEAD()
 }
 
-// CreateAnchor ensures the anchor tag exists on the given commit.
-func CreateAnchor(taskID, commit string) error {
+// CreateAnchor creates an empty anchor commit and tags it for the task.
+// Returns the new commit hash. Only called from contract.Init.
+func CreateAnchor(taskID string) (string, error) {
 	tag := TagPrefix + sanitizeTag(taskID)
-	_, tagErr := git("tag", "-f", tag, commit)
-	return tagErr
+
+	// Check if tag already exists
+	out, err := git("rev-list", "-n", "1", "refs/tags/"+tag)
+	if err == nil && strings.TrimSpace(out) != "" {
+		return "", fmt.Errorf("anchor tag %s already exists", tag)
+	}
+
+	commitMsg := fmt.Sprintf("worktrail: anchor for %s", taskID)
+	if _, err := git("commit", "--allow-empty", "-m", commitMsg); err != nil {
+		return "", fmt.Errorf("create anchor commit: %w", err)
+	}
+
+	head, err := HEAD()
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := git("tag", "-f", tag, head); err != nil {
+		return "", fmt.Errorf("tag anchor: %w", err)
+	}
+
+	return head, nil
 }
 
 // HEAD returns the current HEAD commit hash.
@@ -65,8 +79,7 @@ func CurrentBranch() (string, error) {
 }
 
 // sanitizeTag replaces non-ASCII/unsafe characters with dashes and appends a
-// short hash of the original taskID to prevent collisions between different
-// non-ASCII IDs that sanitize to the same tag.
+// short hash of the original taskID to prevent collisions.
 func sanitizeTag(taskID string) string {
 	var b strings.Builder
 	lastDash := false
@@ -86,7 +99,6 @@ func sanitizeTag(taskID string) string {
 	if result == "" {
 		result = "x"
 	}
-	// Hash suffix for collision safety
 	h := uint32(0)
 	for _, r := range taskID {
 		h = h*31 + uint32(r)
@@ -96,11 +108,11 @@ func sanitizeTag(taskID string) string {
 
 // ─── Tag listing ────────────────────────────────────────────────────────────
 
-// ListTags returns all task IDs from worktrail/* tags.
+// ListTags returns all worktrail/* tag names (with prefix).
 func ListTags() ([]string, error) {
 	out, err := git("tag", "-l", TagPrefix+"*")
 	if err != nil {
-		return nil, fmt.Errorf("git tag -l 'worktrail/*': %w", err)
+		return nil, fmt.Errorf("git tag -l: %w", err)
 	}
 	if strings.TrimSpace(out) == "" {
 		return nil, nil
@@ -108,12 +120,17 @@ func ListTags() ([]string, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	var tags []string
 	for _, line := range lines {
-		tag := strings.TrimSpace(line)
-		if tag != "" {
-			tags = append(tags, tag)
+		t := strings.TrimSpace(line)
+		if t != "" {
+			tags = append(tags, t)
 		}
 	}
 	return tags, nil
+}
+
+// TaskIDFromTag strips the worktrail/ prefix from a tag name.
+func TaskIDFromTag(tag string) string {
+	return strings.TrimPrefix(tag, TagPrefix)
 }
 
 // ResolveTag returns the commit hash a worktrail tag points to.
@@ -128,12 +145,19 @@ func ResolveTag(tag string) (string, error) {
 // ─── Notes CRUD ─────────────────────────────────────────────────────────────
 
 // Read reads the aggregate TaskNote from the git-note on the anchor commit.
+// Returns nil note if no note exists (not an error). Returns error on git failures.
 func Read(anchorCommit string) (*types.TaskNote, error) {
 	out, err := git("notes", "--ref="+NotesRef, "show", anchorCommit)
 	if err != nil {
-		// No note exists yet — that's fine, return empty
-		return &types.TaskNote{}, nil
+		// Distinguish "no note" from real errors by checking output.
+		// git notes show exits 1 with "error: no note found for object" on stderr.
+		// We can't easily distinguish via CombinedOutput, so check the message.
+		if strings.Contains(err.Error(), "no note found") {
+			return &types.TaskNote{}, nil
+		}
+		return nil, fmt.Errorf("git notes show %s: %w", anchorCommit, err)
 	}
+
 	var note types.TaskNote
 	if err := json.Unmarshal([]byte(out), &note); err != nil {
 		return nil, fmt.Errorf("parse task note: %w", err)
@@ -142,13 +166,18 @@ func Read(anchorCommit string) (*types.TaskNote, error) {
 }
 
 // Write writes the aggregate TaskNote to the anchor commit's git-note.
+// Returns error if note is nil.
 func Write(anchorCommit string, note *types.TaskNote) error {
+	if note == nil {
+		return fmt.Errorf("cannot write nil note")
+	}
+
 	data, err := json.MarshalIndent(note, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal task note: %w", err)
 	}
-	err = gitStdin("notes", "--ref="+NotesRef, "add", "-f", "-F", "-", anchorCommit, string(data))
-	if err != nil {
+
+	if err := gitStdin("notes", "--ref="+NotesRef, "add", "-f", "-F", "-", anchorCommit, string(data)); err != nil {
 		return fmt.Errorf("write note: %w", err)
 	}
 	return nil
@@ -156,7 +185,7 @@ func Write(anchorCommit string, note *types.TaskNote) error {
 
 // ─── Convenience helpers ────────────────────────────────────────────────────
 
-// ReadByTask reads the TaskNote for a task by ID.
+// ReadByTask reads the TaskNote for a task by ID. Returns (note, anchor, error).
 func ReadByTask(taskID string) (*types.TaskNote, string, error) {
 	anchor, err := AnchorCommit(taskID)
 	if err != nil {
@@ -184,8 +213,13 @@ func git(args ...string) (string, error) {
 	return string(out), nil
 }
 
-// gitStdin runs a git command, piping stdin content.
+// gitStdin runs a git command piping stdin content through a temp file.
+// Expects at least 3 args: the git args, the anchor commit, and the content.
 func gitStdin(args ...string) error {
+	if len(args) < 3 {
+		return fmt.Errorf("gitStdin requires at least 3 args (git args, commit, content)")
+	}
+
 	n := len(args)
 	content := args[n-1]
 	anchor := args[n-2]
