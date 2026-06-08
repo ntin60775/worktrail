@@ -29,6 +29,11 @@
       "task_id": "WT-001",
       "timestamp": "2026-06-08T02:54:35.874241724+02:00",
       "summary": "Удаление старого Python-кода, pip uninstall, очистка .gitignore"
+    },
+    {
+      "task_id": "WT-001",
+      "timestamp": "2026-06-08T02:54:36.044605306+02:00",
+      "summary": "Бутстрап: worktrail install глобально, doctor all_ok"
     }
   ]
 }
