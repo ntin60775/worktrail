@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"worktrail/internal/gitnotes"
 )
 
 // Install configures git global hooks path and copies the skill definition.
@@ -23,7 +21,7 @@ func Install(dryRun bool) (string, error) {
 		return "", fmt.Errorf("find repo root: %w", err)
 	}
 
-	hooksDir := filepath.Join(repoRoot, gitnotes.WorktrailDir, "hooks")
+	hooksDir := filepath.Join(repoRoot, "hooks")
 
 	// Check hooks directory exists
 	if _, err := os.Stat(hooksDir); os.IsNotExist(err) {
@@ -40,6 +38,16 @@ func Install(dryRun bool) (string, error) {
 			return "", fmt.Errorf("set hooks path: %w", err)
 		}
 		fmt.Fprintf(&b, "✓ Set git global hooks path to `%s`\n", hooksDir)
+	}
+
+	// 2b. Ensure hooks are executable
+	for _, name := range []string{"post-commit", "post-checkout", "prepare-commit-msg"} {
+		hookPath := filepath.Join(hooksDir, name)
+		if fi, err := os.Stat(hookPath); err == nil && !fi.IsDir() {
+			if err := os.Chmod(hookPath, 0o755); err != nil {
+				return "", fmt.Errorf("chmod %s: %w", name, err)
+			}
+		}
 	}
 
 	// 3. Copy SKILL.md to ~/.agents/skills/worktrail/
