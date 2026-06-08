@@ -4,9 +4,9 @@
     "name": "Переход на worktrail v2",
     "summary": "Переход на worktrail v2",
     "scope": "Полная реализация спецификации v2: Go-бинарь, git-notes, 21 CLI-команда, хуки, навык",
-    "status": "draft",
+    "status": "active",
     "created_at": "2026-06-08T02:54:24.782540455+02:00",
-    "updated_at": "2026-06-08T02:54:24.782540455+02:00",
+    "updated_at": "2026-06-08T02:54:24.962383269+02:00",
     "branch": "main"
   }
 }
