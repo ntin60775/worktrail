@@ -92,6 +92,18 @@
       ],
       "file": "internal/verify/verify.go",
       "created_at": "2026-06-08T09:47:19.15297605+02:00"
+    },
+    {
+      "id": "S3",
+      "task_id": "WT-001",
+      "scope": "reviewer",
+      "invariants": [
+        "review run возвращает задания для всех экспертов профиля",
+        "review result принимает JSON и валидирует по схеме",
+        "accepted → done, rejected → active"
+      ],
+      "file": "internal/reviewer/reviewer.go",
+      "created_at": "2026-06-08T09:47:19.334022571+02:00"
     }
   ],
   "progress": [
