@@ -24,6 +24,11 @@
       "task_id": "WT-001",
       "timestamp": "2026-06-08T02:54:35.704684119+02:00",
       "summary": "Инфраструктура: 3 git-хука, SKILL.md v2, agents.md.block, Makefile"
+    },
+    {
+      "task_id": "WT-001",
+      "timestamp": "2026-06-08T02:54:35.874241724+02:00",
+      "summary": "Удаление старого Python-кода, pip uninstall, очистка .gitignore"
     }
   ]
 }
