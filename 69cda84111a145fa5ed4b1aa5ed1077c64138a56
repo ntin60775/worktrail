@@ -80,6 +80,18 @@
       ],
       "file": "internal/gitnotes/gitnotes.go",
       "created_at": "2026-06-08T09:47:18.979303359+02:00"
+    },
+    {
+      "id": "S2",
+      "task_id": "WT-001",
+      "scope": "verify",
+      "invariants": [
+        "Адаптер реализует интерфейс Adapter (Name + Run)",
+        "VRR пишется в JSONL-лог",
+        "Каждый прогон — одна строка JSON"
+      ],
+      "file": "internal/verify/verify.go",
+      "created_at": "2026-06-08T09:47:19.15297605+02:00"
     }
   ],
   "progress": [
