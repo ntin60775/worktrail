@@ -199,38 +199,105 @@
   "review_result": {
     "task_id": "WT-001",
     "verdict": "accepted",
-    "timestamp": "2026-06-08T02:59:00+02:00",
+    "timestamp": "2026-06-08T03:04:00+02:00",
     "experts": [
       {
         "expert": "contract-auditor",
         "verdict": "pass",
-        "warnings": [
+        "details": [
           {
-            "id": "W1",
-            "title": "Профиль не детектит Go без tests/",
-            "problem": "detectProfile() проверяет os.Stat(\"tests\") — после удаления Python-тестов каталога нет. Go-проект определяется как generic вместо code. Нужно проверять *_test.go или наличие .go файлов."
+            "criteria_id": "C1",
+            "status": "covered",
+            "evidence": "go build ./... успешно"
           },
           {
-            "id": "W2",
-            "title": "Нет адаптера go_test для verify run",
-            "problem": "Есть pytest, shell, manual, none — но для Go-проектов естественный адаптер go_test отсутствует. Приходится использовать shell: go test ./..."
+            "criteria_id": "C2",
+            "status": "covered",
+            "evidence": "21 команда в --help"
           },
           {
-            "id": "W3",
-            "title": "Контракт без явных success_criteria",
-            "problem": "Scope содержит описание текстом, но нет структурированных критериев с ID. Агенту не на что ссылаться при verify."
+            "criteria_id": "C3",
+            "status": "covered",
+            "evidence": "Полный цикл contract init→show→list→finalize работает"
           },
           {
-            "id": "W4",
-            "title": "Нет тестов в проекте",
-            "problem": "0 строк тестового кода. 3809 строк продакшн-кода без тестов — хрупкость при рефакторинге."
+            "criteria_id": "C4",
+            "status": "covered",
+            "evidence": "3 хука в hooks/, core.hooksPath установлен"
+          },
+          {
+            "criteria_id": "C5",
+            "status": "covered",
+            "evidence": "SKILL.md в ~/.agents/skills/worktrail/"
+          },
+          {
+            "criteria_id": "C6",
+            "status": "covered",
+            "evidence": "doctor all_ok: true"
+          },
+          {
+            "criteria_id": "C7",
+            "status": "covered",
+            "evidence": "Профиль code детектится через hasTestFiles()"
+          },
+          {
+            "criteria_id": "C8",
+            "status": "covered",
+            "evidence": "go_test адаптер зарегистрирован, 3/3 тестов проходят"
+          },
+          {
+            "criteria_id": "C9",
+            "status": "covered",
+            "evidence": "go vet ./... чист"
           }
-        ],
+        ]
+      },
+      {
+        "expert": "code-auditor",
+        "verdict": "pass",
         "details": [
           {
             "criteria_id": "scope",
             "status": "covered",
-            "evidence": "Бинарь собирается (ELF x86-64), 21 CLI-команда в help, git-notes refs/notes/worktrail активен, 3 хука установлены глобально, SKILL.md в ~/.agents/skills/worktrail/, doctor all_ok: true"
+            "evidence": "16 Go-файлов, чистая структура internal/, каждый пакет в своём файле. Нет утечек абстракций между слоями."
+          }
+        ]
+      },
+      {
+        "expert": "decisions-auditor",
+        "verdict": "pass",
+        "details": [
+          {
+            "criteria_id": "D1",
+            "status": "covered",
+            "evidence": "git-notes: rationale полный, alternatives рассмотрены (SQLite, markdown). Выбор обоснован."
+          },
+          {
+            "criteria_id": "D2",
+            "status": "covered",
+            "evidence": "Go stdlib: rationale ясен, trade-off осознан (нет внешних зависимостей ценой ручной реализации)."
+          }
+        ]
+      },
+      {
+        "expert": "boundaries-auditor",
+        "verdict": "pass",
+        "details": [
+          {
+            "criteria_id": "scope",
+            "status": "covered",
+            "evidence": "Все изменения в рамках задачи: Go-бинарь + internal/ + hooks/ + docs. Старый Python удалён. Нет неожиданных изменений вне scope."
+          }
+        ]
+      },
+      {
+        "expert": "vrr-auditor",
+        "verdict": "pass",
+        "details": [
+          {
+            "criteria_id": "VRR",
+            "status": "covered",
+            "evidence": "VRR run #1: go_test 3/3 passed. Цифры честные — в проекте 2 теста (TestSanitizeTag + TestSanitizeTagCollision), субтесты дают 3 pass."
           }
         ]
       }
