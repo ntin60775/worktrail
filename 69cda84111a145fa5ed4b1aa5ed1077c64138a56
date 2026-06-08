@@ -97,6 +97,11 @@
       "task_id": "WT-001",
       "timestamp": "2026-06-08T02:59:58.246209695+02:00",
       "summary": "Ревью #1: accepted, 4 warnings — исправление"
+    },
+    {
+      "task_id": "WT-001",
+      "timestamp": "2026-06-08T03:03:10.784775517+02:00",
+      "summary": "W1-W4: profile detector, go_test adapter, criteria, tests"
     }
   ],
   "review_package": {
