@@ -19,6 +19,11 @@
       "task_id": "WT-001",
       "timestamp": "2026-06-08T02:54:35.537052197+02:00",
       "summary": "Имплементация: 3809 строк Go, 21 CLI-команда, git-notes, 4 профиля ревью"
+    },
+    {
+      "task_id": "WT-001",
+      "timestamp": "2026-06-08T02:54:35.704684119+02:00",
+      "summary": "Инфраструктура: 3 git-хука, SKILL.md v2, agents.md.block, Makefile"
     }
   ]
 }
