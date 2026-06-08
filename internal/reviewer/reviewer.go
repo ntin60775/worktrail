@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"worktrail/internal/gitnotes"
@@ -124,6 +125,19 @@ func ReviewResult(taskID, verdict, resultFile string) (*types.ReviewResult, erro
 	}
 
 	note.ReviewResult = &rr
+
+	// Update contract status based on verdict.
+	if note.Contract != nil {
+		switch rr.Verdict {
+		case "accepted":
+			note.Contract.Status = "done"
+			note.Contract.UpdatedAt = time.Now()
+		case "rejected":
+			note.Contract.Status = "active"
+			note.Contract.UpdatedAt = time.Now()
+		}
+	}
+
 	if err := gitnotes.Write(anchor, note); err != nil {
 		return nil, fmt.Errorf("write review result: %w", err)
 	}
@@ -145,11 +159,14 @@ func detectProfile() string {
 		return "1c"
 	}
 
-	// Code project — tests/ directory + any code files.
+	// Code project — tests directory, *_test.go files, or any code files.
 	if info, err := os.Stat("tests"); err == nil && info.IsDir() {
 		if hasCodeFiles() {
 			return "code"
 		}
+	}
+	if hasTestFiles() || hasCodeFiles() {
+		return "code"
 	}
 
 	// Research project — paper.md, references.bib, or common research patterns.
@@ -177,14 +194,49 @@ func hasBSL() bool {
 }
 
 func hasCodeFiles() bool {
-	codeExts := []string{"*.go", "*.py", "*.ts", "*.js", "*.rs", "*.java", "*.c", "*.cpp", "*.h", "*.hpp"}
-	for _, ext := range codeExts {
-		matches, _ := filepath.Glob(ext)
-		if len(matches) > 0 {
-			return true
-		}
+	codeExts := map[string]bool{
+		".go": true, ".py": true, ".ts": true, ".js": true, ".rs": true,
+		".java": true, ".c": true, ".cpp": true, ".h": true, ".hpp": true,
 	}
-	return false
+	found := false
+	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if info.IsDir() {
+			name := info.Name()
+			if name == ".git" || name == ".worktrail" || name == "vendor" || name == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := filepath.Ext(path)
+		if codeExts[ext] {
+			found = true
+		}
+		return nil
+	})
+	return found
+}
+
+func hasTestFiles() bool {
+	found := false
+	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if info.IsDir() {
+			if info.Name() == ".git" || info.Name() == ".worktrail" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 func fileExists(path string) bool {

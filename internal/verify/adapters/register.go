@@ -9,6 +9,7 @@ import (
 
 func init() {
 	verify.Register(&PytestAdapter{})
+	verify.Register(&GoTestAdapter{})
 	verify.Register(&ManualAdapter{})
 	verify.Register(&ShellAdapter{})
 	verify.Register(&NoneAdapter{})
