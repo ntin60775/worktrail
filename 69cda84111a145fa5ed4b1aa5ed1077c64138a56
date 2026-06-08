@@ -102,6 +102,11 @@
       "task_id": "WT-001",
       "timestamp": "2026-06-08T03:03:10.784775517+02:00",
       "summary": "W1-W4: profile detector, go_test adapter, criteria, tests"
+    },
+    {
+      "task_id": "WT-001",
+      "timestamp": "2026-06-08T03:04:37.037324691+02:00",
+      "summary": "Ревью #2: accepted, 0 blockers, 5/5 experts pass"
     }
   ],
   "review_package": {
