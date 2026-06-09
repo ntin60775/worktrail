@@ -169,58 +169,6 @@ func BuildReport(taskID string) (string, error) {
 		}
 	}
 
-	// Review package
-	if note.ReviewPackage != nil {
-		rp := note.ReviewPackage
-		fmt.Fprintf(&b, "## Review Package\n\n")
-		fmt.Fprintf(&b, "- **Status:** %s\n", rp.Status)
-		fmt.Fprintf(&b, "- **Verification Runs:** %d\n", rp.VerificationSummary.TotalRuns)
-		if rp.Boundaries.ChangedFiles != nil && len(rp.Boundaries.ChangedFiles) > 0 {
-			fmt.Fprintf(&b, "- **Changed Files:**\n")
-			for _, f := range rp.Boundaries.ChangedFiles {
-				fmt.Fprintf(&b, "  - `%s`\n", f)
-			}
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-
-	// Review result
-	if note.ReviewResult != nil {
-		rr := note.ReviewResult
-		fmt.Fprintf(&b, "## Review Result\n\n")
-		fmt.Fprintf(&b, "- **Verdict:** %s\n", rr.Verdict)
-		fmt.Fprintf(&b, "- **Reviewed:** %s\n", rr.Timestamp.Format(time.RFC3339))
-		for _, expert := range rr.Experts {
-			fmt.Fprintf(&b, "\n### Expert: %s (%s)\n\n", expert.Expert, expert.Verdict)
-			if len(expert.Blockers) > 0 {
-				fmt.Fprintf(&b, "**Blockers:**\n\n")
-				for _, bl := range expert.Blockers {
-					fmt.Fprintf(&b, "- **%s:** %s", bl.Title, bl.Problem)
-					if bl.Fix != "" {
-						fmt.Fprintf(&b, " → Fix: %s", bl.Fix)
-					}
-					fmt.Fprintf(&b, "\n")
-				}
-			}
-			if len(expert.Warnings) > 0 {
-				fmt.Fprintf(&b, "**Warnings:**\n\n")
-				for _, w := range expert.Warnings {
-					fmt.Fprintf(&b, "- **%s:** %s\n", w.Title, w.Problem)
-				}
-			}
-			if len(expert.Details) > 0 {
-				fmt.Fprintf(&b, "**Details:**\n\n")
-				for _, d := range expert.Details {
-					fmt.Fprintf(&b, "- **[%s]** %s", d.CriteriaID, d.Status)
-					if d.Evidence != "" {
-						fmt.Fprintf(&b, " — %s", d.Evidence)
-					}
-					fmt.Fprintf(&b, "\n")
-				}
-			}
-		}
-		fmt.Fprintf(&b, "\n")
-	}
 
 	return b.String(), nil
 }
@@ -305,6 +253,358 @@ func BuildReportAll() (string, error) {
 	fmt.Fprintf(&b, "\n")
 
 	return b.String(), nil
+}
+
+// ─── Timesheet ───────────────────────────────────────────────────────────────
+
+// BuildTimesheet generates a human-readable markdown timesheet for the given task.
+// If taskID is empty, the current task is resolved from git context.
+// from and to are optional date filters in "YYYY-MM-DD" format.
+func BuildTimesheet(taskID, from, to string) (string, error) {
+	if taskID == "" {
+		ctx, err := context.Resolve()
+		if err != nil {
+			return "", fmt.Errorf("resolve context: %w", err)
+		}
+		if !ctx.HasTask {
+			return "", fmt.Errorf("no task in current context")
+		}
+		taskID = ctx.TaskID
+	}
+
+	note, _, err := gitnotes.ReadByTask(taskID)
+	if err != nil {
+		return "", fmt.Errorf("read task %s: %w", taskID, err)
+	}
+	if note.Contract == nil {
+		return "", fmt.Errorf("task %s has no contract", taskID)
+	}
+
+	c := note.Contract
+	title := c.Name
+	if title == "" {
+		title = taskID
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s: %s\n\n", taskID, title)
+	fmt.Fprintf(&b, "## Итого\n\n")
+
+	// Filter progress by date range
+	entries := filterProgress(note.Progress, from, to)
+
+	// Calculate hours from progress entries
+	hours := deriveHours(entries)
+	fmt.Fprintf(&b, "**%.1fч**, %s\n\n", hours, c.Status)
+
+	// Chronology
+	if len(entries) > 0 {
+		fmt.Fprintf(&b, "## Хронология\n\n")
+		fmt.Fprintf(&b, "| Когда | Что сделано |\n")
+		fmt.Fprintf(&b, "|-------|------------|\n")
+		for _, p := range entries {
+			fmt.Fprintf(&b, "| %s | %s |\n",
+				p.Timestamp.Format("15:04 02.01.2006"),
+				p.Summary,
+			)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
+	// Key decisions
+	if len(note.Decisions) > 0 {
+		fmt.Fprintf(&b, "## Ключевые решения\n\n")
+		for _, d := range note.Decisions {
+			fmt.Fprintf(&b, "- **%s:** %s\n", d.Title, d.Rationale)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
+	return b.String(), nil
+}
+
+// BuildTimesheetAll generates a timesheet covering all tasks.
+// from and to are optional date filters in "YYYY-MM-DD" format.
+func BuildTimesheetAll(from, to string) (string, error) {
+	tags, err := gitnotes.ListTags()
+	if err != nil {
+		return "", fmt.Errorf("list tags: %w", err)
+	}
+
+	var b strings.Builder
+
+	// Period header
+	periodLabel := "весь период"
+	if from != "" || to != "" {
+		periodLabel = ""
+		if from != "" {
+			periodLabel = "с " + from
+		}
+		if to != "" {
+			if periodLabel != "" {
+				periodLabel += " "
+			}
+			periodLabel += "по " + to
+		}
+	}
+	fmt.Fprintf(&b, "# Отчёт о работе: %s\n\n", periodLabel)
+
+	if len(tags) == 0 {
+		fmt.Fprintf(&b, "*Нет отслеживаемых задач.*\n")
+		return b.String(), nil
+	}
+
+	// Collect task data
+	type taskData struct {
+		id       string
+		name     string
+		status   string
+		hours    float64
+		progress []types.Progress
+		decisions []types.Decision
+	}
+
+	var doneTasks []taskData
+	var activeTasks []taskData
+	var totalHours float64
+
+	for _, tag := range tags {
+		anchor, err := gitnotes.ResolveTag(tag)
+		if err != nil {
+			continue
+		}
+		note, err := gitnotes.Read(anchor)
+		if err != nil || note.Contract == nil {
+			continue
+		}
+		c := note.Contract
+		name := c.Name
+		if name == "" {
+			name = c.Summary
+		}
+		if name == "" {
+			name = c.TaskID
+		}
+
+		entries := filterProgress(note.Progress, from, to)
+		h := deriveHours(entries)
+
+		td := taskData{
+			id:        c.TaskID,
+			name:      name,
+			status:    c.Status,
+			hours:     h,
+			progress:  entries,
+			decisions: note.Decisions,
+		}
+
+		totalHours += h
+
+		switch c.Status {
+		case "done", "cancelled":
+			doneTasks = append(doneTasks, td)
+		default:
+			activeTasks = append(activeTasks, td)
+		}
+	}
+
+	// Summary
+	fmt.Fprintf(&b, "## Итого\n\n")
+	fmt.Fprintf(&b, "| Показатель | Значение |\n")
+	fmt.Fprintf(&b, "|-----------|---------|\n")
+	fmt.Fprintf(&b, "| Всего часов | %.1f |\n", totalHours)
+	fmt.Fprintf(&b, "| Задач выполнено | %d |\n", len(doneTasks))
+	fmt.Fprintf(&b, "| Задач в работе | %d |\n\n", len(activeTasks))
+
+	// Done tasks
+	if len(doneTasks) > 0 {
+		fmt.Fprintf(&b, "## Выполненные задачи\n\n")
+		for _, td := range doneTasks {
+			fmt.Fprintf(&b, "### %s: %s — %.1fч\n\n", td.id, td.name, td.hours)
+			if td.progress != nil && len(td.progress) > 0 {
+				fmt.Fprintf(&b, "| Когда | Что сделано |\n")
+				fmt.Fprintf(&b, "|-------|------------|\n")
+				for _, p := range td.progress {
+					fmt.Fprintf(&b, "| %s | %s |\n",
+						p.Timestamp.Format("15:04"),
+						p.Summary,
+					)
+				}
+				fmt.Fprintf(&b, "\n")
+			}
+			if td.decisions != nil && len(td.decisions) > 0 {
+				for _, d := range td.decisions {
+					fmt.Fprintf(&b, "- **%s:** %s\n", d.Title, d.Rationale)
+				}
+				fmt.Fprintf(&b, "\n")
+			}
+		}
+	}
+
+	// Active tasks
+	if len(activeTasks) > 0 {
+		fmt.Fprintf(&b, "## В работе\n\n")
+		fmt.Fprintf(&b, "| Задача | Часов | Статус |\n")
+		fmt.Fprintf(&b, "|--------|-------|--------|\n")
+		for _, td := range activeTasks {
+			fmt.Fprintf(&b, "| %s: %s | %.1f | %s |\n",
+				td.id, td.name, td.hours, td.status,
+			)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
+	// Daily chronology
+	if totalHours > 0 {
+		fmt.Fprintf(&b, "## Хронология по дням\n\n")
+		daily := groupByDay(tags, from, to)
+		for _, d := range daily {
+			fmt.Fprint(&b, d)
+		}
+	}
+
+	return b.String(), nil
+}
+
+// ─── Timesheet helpers ───────────────────────────────────────────────────────
+
+// filterProgress returns progress entries within the given date range.
+func filterProgress(entries []types.Progress, from, to string) []types.Progress {
+	if from == "" && to == "" {
+		return entries
+	}
+	var fromT, toT time.Time
+	if from != "" {
+		t, err := time.Parse("2006-01-02", from)
+		if err == nil {
+			fromT = t
+		}
+	}
+	if to != "" {
+		t, err := time.Parse("2006-01-02", to)
+		if err == nil {
+			toT = t.Add(24*time.Hour - time.Second)
+		}
+	}
+	out := make([]types.Progress, 0, len(entries))
+	for _, e := range entries {
+		if !fromT.IsZero() && e.Timestamp.Before(fromT) {
+			continue
+		}
+		if !toT.IsZero() && e.Timestamp.After(toT) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// deriveHours estimates hours from progress entries using a 4h gap heuristic.
+func deriveHours(entries []types.Progress) float64 {
+	if len(entries) < 2 {
+		return 0
+	}
+	var total time.Duration
+	for i := 1; i < len(entries); i++ {
+		d := entries[i].Timestamp.Sub(entries[i-1].Timestamp)
+		if d > 0 && d <= 4*time.Hour {
+			total += d
+		}
+	}
+	return total.Hours()
+}
+
+// groupByDay collects all progress entries across tasks and groups by day.
+func groupByDay(tags []string, from, to string) []string {
+	type entry struct {
+		ts      time.Time
+		task    string
+		summary string
+	}
+	var all []entry
+
+	for _, tag := range tags {
+		anchor, err := gitnotes.ResolveTag(tag)
+		if err != nil {
+			continue
+		}
+		note, err := gitnotes.Read(anchor)
+		if err != nil || note.Contract == nil {
+			continue
+		}
+		for _, p := range note.Progress {
+			if from != "" {
+				ft, err := time.Parse("2006-01-02", from)
+				if err == nil && p.Timestamp.Before(ft) {
+					continue
+				}
+			}
+			if to != "" {
+				tt, err := time.Parse("2006-01-02", to)
+				if err == nil && p.Timestamp.After(tt.Add(24*time.Hour-time.Second)) {
+					continue
+				}
+			}
+			all = append(all, entry{
+				ts:      p.Timestamp,
+				task:    note.Contract.TaskID,
+				summary: p.Summary,
+			})
+		}
+	}
+
+	// Sort by timestamp
+	for i := 0; i < len(all); i++ {
+		for j := i + 1; j < len(all); j++ {
+			if all[j].ts.Before(all[i].ts) {
+				all[i], all[j] = all[j], all[i]
+			}
+		}
+	}
+
+	// Group by day
+	var days []string
+	type dayGroup struct {
+		date    string
+		entries []entry
+	}
+	var groups []dayGroup
+	for _, e := range all {
+		dateKey := e.ts.Format("2006-01-02")
+		if len(groups) == 0 || groups[len(groups)-1].date != dateKey {
+			groups = append(groups, dayGroup{date: dateKey})
+		}
+		groups[len(groups)-1].entries = append(groups[len(groups)-1].entries, e)
+	}
+
+	weekdays := []string{"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"}
+	for _, g := range groups {
+		first := g.entries[0].ts
+		wd := weekdays[first.Weekday()]
+
+		var total time.Duration
+		for i := 1; i < len(g.entries); i++ {
+			d := g.entries[i].ts.Sub(g.entries[i-1].ts)
+			if d > 0 && d <= 4*time.Hour {
+				total += d
+			}
+		}
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "### %s, %s — %.1fч\n\n",
+			g.date, wd, total.Hours())
+		for _, e := range g.entries {
+			fmt.Fprintf(&b, "- %s — [%s] %s\n",
+				e.ts.Format("15:04"),
+				e.task,
+				e.summary,
+			)
+		}
+		fmt.Fprintf(&b, "\n")
+		days = append(days, b.String())
+	}
+
+	return days
 }
 
 // SaveReport writes the report content to .worktrail/reports/<taskID>.md.

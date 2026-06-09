@@ -17,9 +17,6 @@ import (
 	"worktrail/internal/install"
 	"worktrail/internal/list"
 	"worktrail/internal/report"
-	"worktrail/internal/reviewer"
-	"worktrail/internal/verify"
-	_ "worktrail/internal/verify/adapters" // register adapters via init()
 	wt "worktrail/internal/time"
 	"worktrail/internal/types"
 )
@@ -51,17 +48,12 @@ func main() {
 		result, err = handleSpec(args)
 	case "progress":
 		result, err = handleProgress(args)
-	case "verify":
-		result, err = handleVerify(args)
 	case "finalize":
 		result, err = handleFinalize(args)
-	case "review":
-		result, err = handleReview(args)
 	case "report":
 		result, err = handleReport(args)
 	case "archive":
 		result, err = handleArchive(args)
-	case "install":
 		result, err = handleInstall(args)
 	case "doctor":
 		result, err = handleDoctor(args)
@@ -570,140 +562,6 @@ func handleProgressList(args []string) (interface{}, error) {
 	return nil, nil
 }
 
-// ─── Verify ─────────────────────────────────────────────────────────────────
-
-func handleVerify(args []string) (interface{}, error) {
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "usage: worktrail verify <run|log> [args]\n")
-		os.Exit(1)
-	}
-	sub := args[0]
-	switch sub {
-	case "run":
-		return handleVerifyRun(args[1:])
-	case "log":
-		return handleVerifyLog(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "worktrail verify: unknown subcommand %q\n", sub)
-		os.Exit(1)
-		return nil, nil
-	}
-}
-
-func handleVerifyRun(args []string) (interface{}, error) {
-	f := flag.NewFlagSet("verify run", flag.ContinueOnError)
-	jsonFlag := f.Bool("json", false, "output as JSON")
-	method := f.String("method", "", "verification method (required)")
-	taskID := f.String("task-id", "", "task id")
-	scope := f.String("scope", "", "scope")
-	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail verify run --method <method> [--task-id <id>] [--scope \"...\"] [--json]\n")
-	}
-	_ = f.Parse(args)
-
-	if *method == "" {
-		f.Usage()
-		os.Exit(1)
-	}
-
-	vrr, err := verify.RunVerification(*method, *taskID, *scope)
-	if err != nil {
-		return nil, err
-	}
-	if *jsonFlag {
-		return vrr, nil
-	}
-	fmt.Printf("VRR run #%d (%s): %d/%d passed, %d failed\n",
-		vrr.Run, vrr.Method, vrr.Summary.Passed, vrr.Summary.Total, vrr.Summary.Failed)
-	for _, f := range vrr.Failures {
-		fmt.Printf("  FAIL: %s — %s\n", f.Name, f.Message)
-	}
-	return nil, nil
-}
-
-func handleVerifyLog(args []string) (interface{}, error) {
-	f := flag.NewFlagSet("verify log", flag.ContinueOnError)
-	jsonFlag := f.Bool("json", false, "output as JSON")
-	taskID := f.String("task-id", "", "task id")
-	flagLast := f.Bool("last", false, "last run only")
-	run := f.Int("run", 0, "specific run number")
-	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail verify log [--task-id <id>] [--last] [--run <n>] [--json]\n")
-	}
-	_ = f.Parse(args)
-
-	if *taskID == "" {
-		ctx, err := context.Resolve()
-		if err != nil {
-			return nil, err
-		}
-		if !ctx.HasTask {
-			return nil, fmt.Errorf("no task in current context")
-		}
-		*taskID = ctx.TaskID
-	}
-
-	if *flagLast {
-		vrr, err := verify.GetLastVRR(*taskID)
-		if err != nil {
-			return nil, err
-		}
-		if vrr == nil {
-			if *jsonFlag {
-				return map[string]string{"status": "no_vrr_found"}, nil
-			}
-			fmt.Println("No VRR found.")
-			return nil, nil
-		}
-		if *jsonFlag {
-			return vrr, nil
-		}
-		printVRR(*vrr)
-		return nil, nil
-	}
-
-	if *run > 0 {
-		all, err := verify.ReadVRRLog(*taskID)
-		if err != nil {
-			return nil, err
-		}
-		for _, v := range all {
-			if v.Run == *run {
-				if *jsonFlag {
-					return v, nil
-				}
-				printVRR(v)
-				return nil, nil
-			}
-		}
-		return nil, fmt.Errorf("run %d not found", *run)
-	}
-
-	all, err := verify.ReadVRRLog(*taskID)
-	if err != nil {
-		return nil, err
-	}
-	if *jsonFlag {
-		return all, nil
-	}
-	if len(all) == 0 {
-		fmt.Println("No VRR entries.")
-		return nil, nil
-	}
-	for _, v := range all {
-		fmt.Printf("Run #%d (%s): %d/%d passed\n", v.Run, v.Method, v.Summary.Passed, v.Summary.Total)
-	}
-	return nil, nil
-}
-
-func printVRR(v types.VRR) {
-	fmt.Printf("Run #%d: %s\n", v.Run, v.Method)
-	fmt.Printf("  Time:   %s\n", v.Timestamp.Format("2006-01-02 15:04"))
-	fmt.Printf("  Result: %d/%d passed, %d failed\n", v.Summary.Passed, v.Summary.Total, v.Summary.Failed)
-	for _, f := range v.Failures {
-		fmt.Printf("  FAIL: %s\n", f.Name)
-	}
-}
 
 // ─── Finalize ───────────────────────────────────────────────────────────────
 
@@ -711,9 +569,8 @@ func handleFinalize(args []string) (interface{}, error) {
 	f := flag.NewFlagSet("finalize", flag.ContinueOnError)
 	jsonFlag := f.Bool("json", false, "output as JSON")
 	taskID := f.String("task-id", "", "task id")
-	skipReview := f.Bool("skip-review", false, "skip review")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail finalize [--task-id <id>] [--skip-review] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail finalize [--task-id <id>] [--json]\n")
 	}
 	_ = f.Parse(args)
 
@@ -728,100 +585,17 @@ func handleFinalize(args []string) (interface{}, error) {
 		*taskID = ctx.TaskID
 	}
 
-	rp, err := executor.Finalize(*taskID, *skipReview)
+	contract, err := executor.Finalize(*taskID)
 	if err != nil {
 		return nil, err
 	}
 	if *jsonFlag {
-		if rp == nil {
-			return map[string]string{"task_id": *taskID, "status": "done", "skip_review": "true"}, nil
-		}
-		return rp, nil
+		return contract, nil
 	}
-	if *skipReview {
-		fmt.Printf("Task %s finalized (skip-review). Status: done.\n", *taskID)
-	} else {
-		fmt.Printf("Task %s finalized. Status: review. Review package ready.\n", *taskID)
-	}
+	fmt.Printf("Task %s finalized. Status: done.\n", *taskID)
 	return nil, nil
 }
 
-// ─── Review ─────────────────────────────────────────────────────────────────
-
-func handleReview(args []string) (interface{}, error) {
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "usage: worktrail review <run|result> [args]\n")
-		os.Exit(1)
-	}
-	sub := args[0]
-	switch sub {
-	case "run":
-		return handleReviewRun(args[1:])
-	case "result":
-		return handleReviewResult(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "worktrail review: unknown subcommand %q\n", sub)
-		os.Exit(1)
-		return nil, nil
-	}
-}
-
-func handleReviewRun(args []string) (interface{}, error) {
-	f := flag.NewFlagSet("review run", flag.ContinueOnError)
-	jsonFlag := f.Bool("json", false, "output as JSON")
-	taskID := f.String("task-id", "", "task id")
-	profile := f.String("profile", "", "review profile")
-	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail review run --task-id <id> [--profile <profile>] [--json]\n")
-	}
-	_ = f.Parse(args)
-
-	if *taskID == "" {
-		f.Usage()
-		os.Exit(1)
-	}
-
-	jobs, err := reviewer.ReviewRun(*taskID, *profile)
-	if err != nil {
-		return nil, err
-	}
-	if *jsonFlag {
-		return jobs, nil
-	}
-	fmt.Printf("Review jobs for %s:\n", *taskID)
-	for _, j := range jobs {
-		fmt.Printf("  Expert: %s\n", j.Expert)
-		fmt.Printf("  Prompt: %s\n", j.Prompt)
-	}
-	return nil, nil
-}
-
-func handleReviewResult(args []string) (interface{}, error) {
-	f := flag.NewFlagSet("review result", flag.ContinueOnError)
-	jsonFlag := f.Bool("json", false, "output as JSON")
-	taskID := f.String("task-id", "", "task id")
-	verdict := f.String("verdict", "", "accepted|rejected")
-	filePath := f.String("file", "", "result.json path")
-	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail review result --task-id <id> --verdict <accepted|rejected> --file <result.json> [--json]\n")
-	}
-	_ = f.Parse(args)
-
-	if *taskID == "" || *verdict == "" || *filePath == "" {
-		f.Usage()
-		os.Exit(1)
-	}
-
-	result, err := reviewer.ReviewResult(*taskID, *verdict, *filePath)
-	if err != nil {
-		return nil, err
-	}
-	if *jsonFlag {
-		return result, nil
-	}
-	fmt.Printf("Review result for %s: %s\n", *taskID, result.Verdict)
-	return nil, nil
-}
 
 // ─── Report ─────────────────────────────────────────────────────────────────
 
@@ -830,8 +604,11 @@ func handleReport(args []string) (interface{}, error) {
 	jsonFlag := f.Bool("json", false, "output as JSON")
 	taskID := f.String("task-id", "", "task id")
 	save := f.Bool("save", false, "save to file")
+	timesheet := f.Bool("timesheet", false, "timesheet report for employer")
+	from := f.String("from", "", "start date (YYYY-MM-DD)")
+	to := f.String("to", "", "end date (YYYY-MM-DD)")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail report [--task-id <id>] [--save] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail report [--task-id <id>] [--timesheet] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--save] [--json]\n")
 	}
 	_ = f.Parse(args)
 
@@ -839,9 +616,16 @@ func handleReport(args []string) (interface{}, error) {
 		md  string
 		err error
 	)
-	if *taskID != "" {
+	switch {
+	case *timesheet:
+		if *taskID != "" {
+			md, err = report.BuildTimesheet(*taskID, *from, *to)
+		} else {
+			md, err = report.BuildTimesheetAll(*from, *to)
+		}
+	case *taskID != "":
 		md, err = report.BuildReport(*taskID)
-	} else {
+	default:
 		md, err = report.BuildReportAll()
 	}
 	if err != nil {
@@ -849,8 +633,15 @@ func handleReport(args []string) (interface{}, error) {
 	}
 	if *save {
 		_ = os.MkdirAll(".worktrail/reports", 0755)
-		reportPath := fmt.Sprintf(".worktrail/reports/%s.md", *taskID)
-		if *taskID == "" {
+		var reportPath string
+		switch {
+		case *timesheet && *taskID != "":
+			reportPath = fmt.Sprintf(".worktrail/reports/timesheet-%s.md", *taskID)
+		case *timesheet:
+			reportPath = ".worktrail/reports/timesheet.md"
+		case *taskID != "":
+			reportPath = fmt.Sprintf(".worktrail/reports/%s.md", *taskID)
+		default:
 			reportPath = ".worktrail/reports/all.md"
 		}
 		if err := os.WriteFile(reportPath, []byte(md), 0644); err != nil {
@@ -971,13 +762,10 @@ commands:
   spec list          list specs for a task
   progress record    record work progress
   progress list      list progress entries for a task
-  verify run         run verification
-  verify log         show verification log
-  finalize           finalize a task for review
-  review run         prepare review assignments
-  review result      save review verdict
+  finalize           finalize a task (status → done)
   time               derive work duration
   report             generate markdown report
+  report --timesheet timesheet for employer
   archive tck        archive legacy TCK structure
   install            global install
   doctor             diagnostics

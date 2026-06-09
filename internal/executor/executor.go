@@ -5,14 +5,11 @@ package executor
 import (
 	"errors"
 	"fmt"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"worktrail/internal/context"
 	"worktrail/internal/gitnotes"
 	"worktrail/internal/types"
-	"worktrail/internal/verify"
 )
 
 // ErrNoTask is returned when the current context has no active task.
@@ -185,15 +182,11 @@ func ListSpecs(taskID string) ([]types.Spec, error) {
 
 // ─── Finalize ─────────────────────────────────────────────────────────────────
 
-// Finalize assembles a review package, sets the task status, derives work
-// duration, and writes everything back to the git-note.
-//
-// If skipReview is true, status is set to "done" immediately without building
-// a review package. Otherwise, status is set to "review" and the review
-// package is stored in the note.
+// Finalize sets the task status to "done", records the finish timestamp,
+// and writes the updated contract back to the git-note.
 //
 // If taskID is empty, the current task is resolved from git context.
-func Finalize(taskID string, skipReview bool) (*types.ReviewPackage, error) {
+func Finalize(taskID string) (*types.Contract, error) {
 	tid, err := resolveTaskID(taskID)
 	if err != nil {
 		return nil, err
@@ -208,89 +201,18 @@ func Finalize(taskID string, skipReview bool) (*types.ReviewPackage, error) {
 	}
 
 	contract := note.Contract
-
-	// Compute boundaries: changed files since anchor commit.
-	changedFiles, err := diffFiles(anchor)
-	if err != nil {
-		return nil, fmt.Errorf("compute boundaries: %w", err)
-	}
-
-	// Read last VRR from JSONL log.
-	lastVRR, totalRuns := readLastVRR(tid)
-
-	vrrLogPath := filepath.Join(gitnotes.WorktrailDir, tid, "vrr.jsonl")
-
-	verificationSummary := types.VerificationSummary{
-		TotalRuns: totalRuns,
-		VRRLog:    vrrLogPath,
-	}
-	if lastVRR != nil {
-		verificationSummary.FinalRun = *lastVRR
-	}
-
-	boundaries := types.Boundaries{
-		ChangedFiles: changedFiles,
-	}
-
-	var rp *types.ReviewPackage
-
-	if skipReview {
-		contract.Status = "done"
-	} else {
-		contract.Status = "review"
-
-		rp = &types.ReviewPackage{
-			TaskID:              tid,
-			Status:              "review",
-			Contract:            *contract,
-			VerificationSummary: verificationSummary,
-			Decisions:           note.Decisions,
-			Specs:               note.Specs,
-			Boundaries:          boundaries,
-		}
-		note.ReviewPackage = rp
-	}
-
+	contract.Status = "done"
 	contract.UpdatedAt = time.Now()
-
 	note.Contract = contract
 
 	if err := gitnotes.Write(anchor, note); err != nil {
 		return nil, fmt.Errorf("write finalize: %w", err)
 	}
 
-	return rp, nil
+	return contract, nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// diffFiles returns the list of files changed between the given commit and HEAD.
-func diffFiles(anchor string) ([]string, error) {
-	cmd := exec.Command("git", "diff", anchor+"..HEAD", "--name-only")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	lines := splitLines(string(out))
-	return lines, nil
-}
-
-// readLastVRR reads the VRR JSONL log and returns the last entry and total count.
-// It delegates to verify.ReadVRRLog so the path always matches the writer.
-func readLastVRR(taskID string) (*types.VRR, int) {
-	entries, err := verify.ReadVRRLog(taskID)
-	if err != nil {
-		return nil, 0
-	}
-	if len(entries) == 0 {
-		return nil, 0
-	}
-	last := entries[len(entries)-1]
-	return &last, len(entries)
-}
 
 // splitLines splits text into lines, trimming trailing empty entries.
 func splitLines(s string) []string {
