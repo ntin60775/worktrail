@@ -54,6 +54,7 @@ func main() {
 		result, err = handleReport(args)
 	case "archive":
 		result, err = handleArchive(args)
+	case "install":
 		result, err = handleInstall(args)
 	case "doctor":
 		result, err = handleDoctor(args)
