@@ -2,256 +2,159 @@
 
 ## Project Overview
 
-**worktrail** — CLI-инструмент учёта рабочего времени и управления знаниями по задачам внутри git-репозитория. Хранит всё в локальном SQLite (`.worktrail/runtime.db`), не требует облачных сервисов. Вывод на русском, код на английском.
+**worktrail v2** — git-embedded task knowledge system. CLI-инструмент для агента, не разработчика.
+Хранит знания о задаче в git-notes (`refs/notes/worktrail`). Вывод на русском, код на английском.
 
-- Python **3.11+**, единственная продуктовая зависимость: `pyyaml>=6.0`
-- Сборка: `setuptools` (src-layout), точка входа: `worktrail = worktrail.cli.main:main`
+- **Go 1.21+**, **ноль внешних зависимостей** (stdlib only)
+- Один бинарник: `worktrail`
 - Лицензия: MIT
 
-## Architecture & Data Flow
+## System Boundaries
+
+Worktrail — это **знания о задаче внутри git-репозитория**. Он отвечает на вопросы:
+«над чем работаю?», «что сделано?», «почему так?», «работает ли?», «готово ли к ревью?».
+
+### Что ДЕЛАЕТ worktrail (зона ответственности)
+
+| Артефакт | Команда | Суть |
+|----------|---------|------|
+| Contract | `contract init/show/update` | Что делаем, критерии успеха, как проверять |
+| Progress | `progress record/list` | Хроника: что и когда сделано |
+| Decision | `decision record/list` | Архитектурный выбор и его обоснование |
+| Spec | `spec record/list` | Инварианты модуля/API — переживают задачу |
+| VRR | `verify run/log` | Результаты прогонов тестов/проверок |
+| Review Package | `finalize` | Сборка всех знаний для ревью |
+| Review Result | `review run/result` | Вердикт экспертов |
+| Time | `time` | Оценка времени по git-логу (4h gap heuristic) |
+| Report | `report` | Markdown-агрегация всех знаний |
+| Context | `context` | Определение текущей задачи из ветки |
+| Install | `install` | Глобальные хуки + бинарь |
+| Doctor | `doctor` | Диагностика установки |
+
+### Чего НЕ делает worktrail
+
+| Не делает | Почему | Чья зона |
+|-----------|--------|----------|
+| Не создаёт структуру каталогов (`src/`, `internal/`, `Config/`) | Это артефакты задачи, не знание о ней | Разработчик / OMP-агент |
+| Не инициализирует `go.mod`, `pyproject.toml`, `.golangci.yml` | Пакетные менеджеры и линтеры — внешние инструменты | Разработчик |
+| Не управляет зависимостями | `go get`, `pip install`, `npm install` | Пакетный менеджер |
+| Не навязывает git-флоу | Git-флоу — соглашение команды | Разработчик |
+| Не создаёт OMP/Claude/Codex-агентов | Агенты — среда исполнения, не task knowledge | Разработчик / OMP-конфиг |
+| Не хостит, не деплоит, не CI/CD | CI/CD — отдельная система | CI/CD |
+| Не заменяет IDE/EDT/Конфигуратор | Линтинг, автодополнение, отладка | Внешние инструменты |
+| Не мигрирует данные между проектами | Задача живёт внутри одного репо | Ручной перенос |
+| Не заменяет таск-трекер | Нет досок, спринтов, эстимейтов | Таск-трекер |
+
+### Про домены
+
+Домен — знание о том, **как верифицировать** и **что проверять при ревью** в конкретной экосистеме.
+Описывается встроенным YAML-конфигом. Worktrail поставляется с доменами: `code`, `1c`, `research`.
+
+Домен **не** создаёт код, структуру каталогов или конфиги экосистемы.
+
+## Architecture
 
 ```
-CLI (argparse + @command registry)
-  ├── handlers/   — обработчики команд (task, journal, explore, initiative, report, …)
-  ├── commands.py — реестр команд, общие хелперы
-  ├── main.py     — точка входа, сборка парсера, диспетчеризация
-  └── doctor.py   — диагностика (6 проверок)
+CLI (flag-based, 21 command)
+  │
+  ├── internal/gitnotes/  — git-notes CRUD + anchor tags
+  ├── internal/context/   — resolve task from branch/notes
+  ├── internal/contract/  — contract init/show/update
+  ├── internal/executor/  — progress, decision, spec, finalize
+  ├── internal/verify/    — adapter interface + runners
+  ├── internal/reviewer/  — review run/result
+  ├── internal/domain/    — domain detection, adapters, experts
+  ├── internal/report/    — markdown generation
+  ├── internal/time/      — git-log time derivation
+  ├── internal/list/      — task listing
+  ├── internal/install/   — bootstrap: hooks, binary, skill
+  ├── internal/archive/   — TCK v1 read-only viewer
+  └── internal/doctor/    — health diagnostics
 
-Core (чистые данные, без CLI)
-  ├── models.py   — dataclasses: Task, Session, Checkpoint, JournalEntry, Config
-  ├── db.py       — SQLite schema (5 таблиц), get_connection(), init_db(), migrate_schema()
-  ├── repository.py — CRUD через raw SQL + sqlite3.Row, возвращает dataclass-экземпляры
-  └── config.py   — YAML-конфиг (.worktrail/config.yaml) с JSON-fallback
-
-Domain modules
-  ├── tracker/    — TrackerEngine (жизненный цикл сессии), IdleMonitor (авто-пауза по mtime)
-  ├── reporter/   — ReportGenerator → ReportItem/Block → render_terminal() / render_markdown()
-  ├── git_bridge/ — run_git() subprocess, извлечение task-id из ветки, git-хуки
-  └── migrator/   — парсинг v1 task.md → импорт в SQLite (9-шаговый пайплайн)
+  hooks/                  — 3 git hooks (shell)
+  SKILL.md                — agent skill definition
+  agents.md.block         — managed block for AGENTS.md
 ```
 
-**Поток данных**: CLI handler → TrackerEngine / ReportGenerator / Migrator → Repository (raw SQL) → SQLite. Все временные метки — ISO8601 UTC-строки. Никакого ORM, никакого кеширования (поиск project root — честный walk по директориям на каждый вызов).
+Все данные — в `refs/notes/worktrail`. Одна заметка на якорный коммит, агрегатный JSON:
+`{ contract, decisions, specs, progress, review_package, review_result }`.
 
-**Принципы**:
-- Локальный SQLite, zero external services
-- Plain SQLite + YAML — никакого lock-in
-- Git-native: живёт внутри репозитория, хакает хуки
-- Только одна активная сессия в каждый момент
-- Knowledge-first: journal (proposal/design/spec/decision/note/artifact) наравне с трекингом времени
-- Русский CLI-вывод, английский код и docstrings
+Якорный коммит — уникальный пустой коммит на задачу. Тег `worktrail/<sanitized-id>` указывает на него.
 
 ## Key Directories
 
 | Путь | Назначение |
 |------|-----------|
-| `src/worktrail/` | Пакет проекта |
-| `src/worktrail/core/` | Модели данных, БД, CRUD, конфиг — фундамент |
-| `src/worktrail/cli/` | CLI-слой: парсер, реестр команд, handlers, диагностика |
-| `src/worktrail/cli/handlers/` | По одному модулю на группу команд: `task.py`, `journal.py`, `explore.py`, `initiative.py`, `archive.py`, `report.py`, `migrate.py`, `system.py` |
-| `src/worktrail/tracker/` | Движок сессии (start/stop/pause/resume) + idle-монитор |
-| `src/worktrail/reporter/` | Генерация отчётов (терминал / Markdown) |
-| `src/worktrail/git_bridge/` | Git-операции и управление хуками |
-| `src/worktrail/migrator/` | Миграция из task-centric-knowledge v1 |
-| `tests/` | Тесты (pytest), по файлу на модуль |
-| `.worktrail/` | Runtime-данные (runtime.db, config.yaml, reports/) — НЕ коммитить |
+| `cmd/worktrail/main.go` | CLI точка входа |
+| `internal/gitnotes/` | git-notes + anchor commit management |
+| `internal/contract/` | Контракт задачи |
+| `internal/executor/` | Progress, decision, spec, finalize |
+| `internal/verify/` | Adapter interface + pytest/go_test/shell/manual/none |
+| `internal/reviewer/` | Review run/result + профили экспертов |
+| `internal/domain/` | Доменная модель: detect, adapters, experts |
+| `internal/report/` | Markdown-отчёты |
+| `internal/time/` | Время по git-логу |
+| `hooks/` | post-commit, post-checkout, prepare-commit-msg |
+| `references/` | Спецификация, дизайн, JSON-схемы |
+| `SKILL.md` | Определение навыка для OMP |
+| `agents.md.block` | Блок для вставки в AGENTS.md проекта |
 
 ## Development Commands
 
 ```bash
-# Установка в dev-режиме
-pip install -e ".[dev]"
+go build -o worktrail ./cmd/worktrail    # сборка
+go vet ./...                             # статический анализ
+go run ./cmd/worktrail <cmd>             # запуск без сборки
 
-# Запуск тестов
-pytest                          # все тесты
-pytest tests/test_core.py       # конкретный файл
-pytest -k "test_create_task"    # по имени теста
-pytest --cov=worktrail          # с покрытием
-
-# Запуск CLI (после установки)
-worktrail --help
-worktrail init
-worktrail start TEST-001 --name "Test task"
-
-# Без установки
-PYTHONPATH=src python -m worktrail --help
+./worktrail install                      # глобальный бутстрап
+./worktrail doctor                       # диагностика
+./worktrail test                         # go test + vet (через адаптер)
 ```
 
-**Важно**: `pyproject.toml` настраивает `pythonpath = ["src"]` для pytest — тесты импортируют пакет напрямую.
+## Code Conventions
 
-## Code Conventions & Common Patterns
+### Go-пакеты
 
-### Dataclasses как модели
+Каждый пакет в своём файле под `internal/`. Экспортируемые функции с заглавной, внутренние — строчной.
 
-Все доменные объекты — `@dataclass` с `field(default_factory=...)` для временных меток. Поля опциональные через `Optional[X] = None`. Никаких Python-перечислений — валидация значений через SQLite `CHECK` constraints.
+### Ошибки
 
-```python
-@dataclass
-class Task:
-    id: str
-    name: str
-    status: str = "draft"
-    kind: str = "task"
-    branch: Optional[str] = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    parent_id: Optional[str] = None
-```
+Ошибки **никогда** не глотаются молча. `Read()` возвращает ошибку git, а не пустую заметку.
+Каждый `if err != nil` либо пробрасывает, либо логирует осмысленно.
+
+### git-notes
+
+- Read — возвращает ошибку или пустую заметку (её нет, не ошибка)
+- Write — принимает `*TaskNote`, возвращает ошибку
+- AnchorCommit — READ-ONLY, без сайд-эффектов
+- CreateAnchor — создаёт коммит + тег, вызывается только из contract.Init
 
 ### Временные метки
 
-**Всегда** ISO8601 UTC-строки: `datetime.now(timezone.utc).isoformat()`. Хранятся в SQLite как `TEXT`. Статический хелпер `Repository._now()` для консистентности.
+`time.Now()` — локальное время системы. Верификация использует `time.Now()` для VRR.
+Контракт и решения — `time.Now()`.
 
-### Raw SQL, без ORM
+### Статус-машина
 
-Repository пишет сырой SQL через `sqlite3.Row`-фабрику, возвращает экземпляры dataclass. Коннекты через context manager `get_connection()` из `db.py`. Каждая операция записи — auto-commit (отдельная транзакция).
+Разрешённые переходы статусов в `contract.ValidateTransition()`:
+`draft → active|cancelled`, `active → blocked|review|done|cancelled`,
+`blocked → active|cancelled`, `review → done|active|cancelled`,
+`done → active`, `cancelled → draft`.
 
-```python
-repo = Repository()  # авто-поиск runtime.db
-with repo.conn() as conn:
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-```
+### 1С
 
-### Plugin-based CLI
+Домен `1c` ориентирован на **формат выгрузки конфигуратора**, не EDT.
+Файлы: `*.bsl`, `*.mdo`, `*.os`, `MainModule.bsl`.
+Адаптер: `1c_syntax_check` (синтаксис-контроль).
+Эксперты ревью: `1c-code-auditor` (BSL-паттерны), `1c-metadata-auditor` (ссылочная целостность).
 
-Команды регистрируются декораторами `@command` / `@arg` из `worktrail.cli.commands`. Все handlers лежат в `cli/handlers/`, импортируются через `__init__.py` — сам факт импорта триггерит регистрацию. `main.py` строит argparse-парсер динамически из реестра.
-
-```python
-# cli/handlers/task.py
-from worktrail.cli.commands import command, arg
-
-@command("start", help="Начать учёт времени для задачи")
-@arg("task_id", help="ID задачи")
-@arg("--name", help="Название задачи")
-def handle_start(args) -> int:
-    ...
-    return 0
-```
-
-Каждый handler возвращает `int` (код выхода): `0` — успех, `1` — ошибка. `main()` ловит `KeyboardInterrupt` → 130, `Exception` → 1.
-
-### Обработка ошибок
-
-- CLI: handler возвращает код выхода; `main()` ловит исключения → печатает в stderr и выходит с кодом 1
-- Core/Repository: исключения пробрасываются наверх (нет подавления)
-- TrackerEngine: возвращает `None` для no-op операций (например, `stop()` когда нет активной сессии)
-- Migrator: собирает ошибки в отчёт, не прерывается на первом сбое
-- Git bridge: `run_git()` возвращает `subprocess.CompletedProcess`, вызывающий код проверяет `returncode`
-
-### Git-операции
-
-Только через `subprocess.run(["git", "-C", repo_root, ...], capture_output=True, text=True)`. Никаких GitPython/libgit2. Ветка извлекается через `git rev-parse --abbrev-ref HEAD`, task-id — regex `^(?:task|du)/(\S+?)(?:-|$)` из имени ветки.
-
-### Конфигурация
-
-Два пути хранения:
-1. **YAML-файл** (`.worktrail/config.yaml`) — для runtime-настроек: `idle_timeout: 900`, `git_hooks_enabled: true`. JSON-fallback если PyYAML недоступен.
-2. **SQLite-таблица `config`** — key/value для per-project настроек (используется мигратором и т.п.)
-
-### Локализация
-
-- Весь пользовательский вывод — **на русском** (print, help-тексты)
-- Код, docstrings, комментарии, имена переменных — **на английском**
-- Хелперы: `fmt_seconds()` (русский формат времени: «1ч 15м 30с»), `pluralize()` (русское склонение), `_translate_status()` (статусы по-русски)
-
-## Important Files
-
-| Файл | Роль |
-|------|------|
-| `pyproject.toml` | Сборка, зависимости, точка входа, конфиг pytest |
-| `src/worktrail/__init__.py` | `__version__ = "0.1.0"` |
-| `src/worktrail/__main__.py` | `python -m worktrail` |
-| `src/worktrail/cli/main.py` | Точка входа CLI (`worktrail`), сборка парсера |
-| `src/worktrail/cli/commands.py` | Реестр команд, декораторы, общие хелперы |
-| `src/worktrail/core/models.py` | 5 dataclass-моделей |
-| `src/worktrail/core/db.py` | SQLite schema (5 таблиц), connection, миграции |
-| `src/worktrail/core/repository.py` | CRUD для всех сущностей (~660 строк) |
-| `src/worktrail/core/config.py` | YAML/JSON конфиг |
-| `src/worktrail/tracker/engine.py` | TrackerEngine — жизненный цикл сессии |
-| `src/worktrail/reporter/__init__.py` | ReportGenerator — точка входа для отчётов |
-| `src/worktrail/git_bridge/parser.py` | Git-обёртки, парсинг веток |
-| `src/worktrail/git_bridge/hooks.py` | Установка/удаление git-хуков |
-| `src/worktrail/migrator/migrator.py` | Оркестратор миграции v1→v2 |
-| `.worktrail/config.yaml` | Runtime-конфиг (не коммитится) |
-| `.worktrail/runtime.db` | Основная БД (не коммитится) |
-
-## Database Schema
-
-5 таблиц в `.worktrail/runtime.db`:
-
-```sql
-tasks (id TEXT PK, name, status CHECK(8), kind CHECK(task|exploration|initiative),
-       branch, created_at, updated_at, parent_id REFERENCES tasks)
-
-sessions (id INTEGER PK, task_id REFERENCES tasks, started_at, ended_at,
-          status CHECK(active|paused|ended), total_seconds)
-
-checkpoints (id INTEGER PK, session_id REFERENCES sessions, message, timestamp,
-             source CHECK(manual|hook|auto), commit_hash)
-
-journal (id INTEGER PK, task_id REFERENCES tasks,
-         kind CHECK(proposal|design|spec|decision|note|artifact),
-         title, body, created_at)
-
-config (key TEXT PK, value)
-```
-
-Миграции схемы — через `migrate_schema()` в `db.py`: проверяет наличие колонок (`kind`, `branch`, `parent_id`), добавляет `ALTER TABLE ADD COLUMN` при необходимости (forward-compat для проектов с v0.1).
-
-## Runtime/Tooling Preferences
-
-- **Рантайм**: Python 3.11+ (используются `from __future__ import annotations`, `X | None`-синтаксис)
-- **Сборка**: setuptools (не poetry/hatch/flit), src-layout
-- **Пакетный менеджер**: pip (нет lock-файла)
-- **Зависимости**: минимум — `pyyaml` (production), `pytest` + `pytest-cov` (dev)
-- **НЕ использовать**: ORM, Node.js, Markdown-файлы как хранилище, внешние БД/сервисы
-- **Философия**: boring technology, no lock-in, git-native, single binary (`worktrail`)
-
-## Testing & QA
-
-### Структура
-
-6 независимых тестовых файлов, каждый покрывает одну подсистему:
-
-| Файл | Строк | Что тестирует |
-|------|-------|--------------|
-| `tests/test_core.py` | 721 | db, models, repository, config |
-| `tests/test_cli.py` | 625 | commands registry, parser, main dispatch |
-| `tests/test_tracker.py` | 388 | TrackerEngine сессии, IdleMonitor |
-| `tests/test_reporter.py` | 532 | formatter (группировка чекпоинтов), writer (рендеринг) |
-| `tests/test_git_bridge.py` | 426 | git parser, hooks install/remove/verify |
-| `tests/test_migrator.py` | 795 | v1 parser, migrator pipeline, status normalization |
-
-Всего ~180 тестов.
-
-### Подход
-
-- **Фреймворк**: чистый pytest (без unittest.TestCase)
-- **Фикстуры**: function-scoped, определяются в файлах тестов (нет `conftest.py`)
-- **БД**: реальный SQLite in-memory / tmp файл для core/tracker/reporter (без моков)
-- **Git**: реальные git-подпроцессы во временных репозиториях для `git_bridge`
-- **Мигратор**: моки git-операций, реальный парсинг v1-файлов из фикстур
-- **freezegun**: используется в `test_tracker.py`, но **не объявлен** в dev-зависимостях — требует ручной установки
-
-### Запуск
+## Testing
 
 ```bash
-pytest                              # все тесты
-pytest tests/test_core.py           # один модуль
-pytest -k "test_start"              # фильтр по имени
-pytest --cov=worktrail --cov-report=term-missing
+go test ./...                    # все тесты
+go test ./internal/gitnotes/     # конкретный пакет
+go test -run TestSanitizeTag     # конкретный тест
 ```
 
-### Конвенции
-
-- Имена тестов: `test_<действие>[_<условие>]`
-- Тесты сгруппированы в классы по тестируемой функции/модулю (`class TestCreateTask`)
-- Параметризация через `@pytest.mark.parametrize` для edge-cases (особенно в migrator — 12 случаев статусов)
-- Временные директории: микс `tmp_path` (pytest) и `tempfile.TemporaryDirectory` — предпочтительнее `tmp_path`
-
-### Не покрыто
-
-- SQLite error paths (блокировки, constraint violations)
-- Конкурентные сессии
-- detached HEAD в git
-- Большие объёмы данных (performance)
-- `--help` вывод для подкоманд
+Тесты — `*_test.go` рядом с кодом. Фикстуры — function-scoped. Без моков для git:
+реальные подпроцессы в тестах пока не используются (только unit-тесты sanitizeTag).
