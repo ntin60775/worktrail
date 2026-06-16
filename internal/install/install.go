@@ -1,6 +1,5 @@
-// Package install sets up worktrail globally: git hooks, skill directory,
-// binary, managed blocks in agent global rules, PATH check, smoke test.
-// Also provides uninstall and TCK conflict resolution.
+// Package install sets up worktrail globally: git hooks, skill copy,
+// binary build+install, PATH check, smoke test. Also provides uninstall and TCK conflict resolution.
 package install
 
 import (
@@ -12,11 +11,6 @@ import (
 	"strings"
 )
 
-// Worktrail block markers (must match the convention used by OMP/Pi/OpenCode).
-const (
-	worktrailBeginMarker = "⟦⟦BEGIN_WORKTRAIL#WT01⟧⟧"
-	worktrailEndMarker   = "⟦⟦END_WORKTRAIL#WT01⟧⟧"
-)
 
 // TCK markers — the #XXXX suffix varies, match generically.
 var (
@@ -27,8 +21,8 @@ var (
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 // Install performs a full global bootstrap: TCK conflict check, git hooks,
-// skill copy, managed-block injection, binary build+install, PATH check,
-// smoke test. If dryRun is true, reports what would be done without changes.
+// skill copy, binary build+install, PATH check, smoke test.
+// If dryRun is true, reports what would be done without changes.
 func Install(dryRun bool) (string, error) {
 	var b strings.Builder
 
@@ -110,23 +104,6 @@ func Install(dryRun bool) (string, error) {
 		}
 		fmt.Fprintf(&b, "✓ skill installed to `%s`\n", skillPath)
 	}
-
-	// Step 2b — Managed block in global agent rules
-	fmt.Fprintf(&b, "\n## 2b. Managed Block\n\n")
-	blockPath := filepath.Join(repoRoot, "agents.md.block")
-	blockData, err := os.ReadFile(blockPath)
-	if err != nil {
-		fmt.Fprintf(&b, "✗ agents.md.block not found at %s\n", blockPath)
-		return b.String(), fmt.Errorf("read agents.md.block: %w", err)
-	}
-	blockContent := string(blockData)
-	blockReport, err := injectGlobalManagedBlocks(dryRun, blockContent)
-	if err != nil {
-		fmt.Fprintf(&b, "✗ managed block injection failed: %v\n", err)
-		return b.String(), fmt.Errorf("managed block: %w", err)
-	}
-	fmt.Fprint(&b, blockReport)
-
 	// Step 3 — Binary (build + install)
 	fmt.Fprintf(&b, "\n## 3. Binary\n\n")
 	builtBinary := filepath.Join(repoRoot, "worktrail")
@@ -188,8 +165,7 @@ func Install(dryRun bool) (string, error) {
 	return b.String(), nil
 }
 
-// Uninstall removes worktrail globally: git hooks config, skill directory,
-// binary, and managed blocks from agent global rules.
+// Uninstall removes worktrail globally: git hooks config, skill directory, and binary.
 // If dryRun is true, reports what would be done without changes.
 func Uninstall(dryRun bool) (string, error) {
 	var b strings.Builder
@@ -238,6 +214,7 @@ func Uninstall(dryRun bool) (string, error) {
 		}
 	}
 
+
 	// Step 3 — Binary
 	fmt.Fprintf(&b, "\n## 3. Binary\n\n")
 	binPath := filepath.Join(homeDir, ".local", "bin", "worktrail")
@@ -253,14 +230,6 @@ func Uninstall(dryRun bool) (string, error) {
 		}
 	}
 
-	// Step 4 — Managed blocks from global agent rules
-	fmt.Fprintf(&b, "\n## 4. Managed Blocks\n\n")
-	blockReport, err := removeGlobalManagedBlocks(dryRun)
-	if err != nil {
-		fmt.Fprintf(&b, "✗ managed block removal failed: %v\n", err)
-	} else {
-		fmt.Fprint(&b, blockReport)
-	}
 
 	return b.String(), nil
 }
@@ -386,134 +355,6 @@ func cleanTCKBlock(path string) error {
 	return os.WriteFile(path, []byte(strings.TrimRight(cleaned, "\n")+"\n"), 0o644)
 }
 
-// ─── Managed block injection / removal ─────────────────────────────────────
-
-// globalAgentPaths returns paths to global AGENTS.md for supported agents.
-func globalAgentPaths() map[string]string {
-	home, _ := os.UserHomeDir()
-	return map[string]string{
-		"omp":      filepath.Join(home, ".omp", "agent", "AGENTS.md"),
-		"pi":       filepath.Join(home, ".pi", "agent", "AGENTS.md"),
-		"opencode": filepath.Join(home, ".opencode", "AGENTS.md"),
-	}
-}
-
-// injectGlobalManagedBlocks writes the managed block into each global agent
-// rules file. Missing files are created. Existing blocks are updated in-place.
-func injectGlobalManagedBlocks(dryRun bool, blockContent string) (string, error) {
-	var b strings.Builder
-	fullBlock := worktrailBeginMarker + "\n" + blockContent + "\n" + worktrailEndMarker + "\n"
-
-	for agent, path := range globalAgentPaths() {
-		if dryRun {
-			fmt.Fprintf(&b, "[dry-run] Would inject managed block into `%s` (%s)\n", path, agent)
-			continue
-		}
-		if err := injectManagedBlock(path, fullBlock); err != nil {
-			fmt.Fprintf(&b, "✗ failed to inject into `%s` (%s): %v\n", path, agent, err)
-		} else {
-			fmt.Fprintf(&b, "✓ managed block injected into `%s` (%s)\n", path, agent)
-		}
-	}
-	return b.String(), nil
-}
-
-// injectManagedBlock ensures the worktrail managed block is present in the
-// file at path. If an existing worktrail block is found, it is replaced.
-// Otherwise the block is appended. The file is created if missing.
-func injectManagedBlock(path string, block string) error {
-	existing, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-
-	content := string(existing)
-
-	// Check if block already exists — replace it.
-	beginIdx := strings.Index(content, worktrailBeginMarker)
-	endIdx := strings.Index(content, worktrailEndMarker)
-
-	if beginIdx >= 0 && endIdx > beginIdx {
-		// Replace existing block.
-		endPos := endIdx + len(worktrailEndMarker)
-		// Consume trailing newline after END marker if present.
-		if endPos < len(content) && content[endPos] == '\n' {
-			endPos++
-		}
-		content = content[:beginIdx] + block + content[endPos:]
-	} else if beginIdx >= 0 && endIdx < 0 {
-		return fmt.Errorf("worktrail BEGIN marker found without END marker in %s", path)
-	} else {
-		// No existing block — append.
-		if len(content) > 0 && content[len(content)-1] != '\n' {
-			content += "\n"
-		}
-		if len(content) > 0 && content[len(content)-1] != '\n' {
-			content += "\n"
-		}
-		content += block
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create parent dir: %w", err)
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-// removeGlobalManagedBlocks removes the worktrail managed block from each
-// global agent rules file.
-func removeGlobalManagedBlocks(dryRun bool) (string, error) {
-	var b strings.Builder
-	for agent, path := range globalAgentPaths() {
-		if dryRun {
-			fmt.Fprintf(&b, "[dry-run] Would remove managed block from `%s` (%s)\n", path, agent)
-			continue
-		}
-		if err := removeManagedBlock(path); err != nil {
-			fmt.Fprintf(&b, "✗ failed to remove from `%s` (%s): %v\n", path, agent, err)
-		} else {
-			fmt.Fprintf(&b, "✓ managed block removed from `%s` (%s)\n", path, agent)
-		}
-	}
-	return b.String(), nil
-}
-
-// removeManagedBlock removes the worktrail managed block from the file at path.
-// If the file becomes empty, it is removed. Missing file is a no-op.
-func removeManagedBlock(path string) error {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-
-	content := string(data)
-	beginIdx := strings.Index(content, worktrailBeginMarker)
-	endIdx := strings.Index(content, worktrailEndMarker)
-
-	if beginIdx < 0 || endIdx <= beginIdx {
-		return nil // no block or malformed — nothing to do
-	}
-
-	endPos := endIdx + len(worktrailEndMarker)
-	if endPos < len(content) && content[endPos] == '\n' {
-		endPos++
-	}
-
-	cleaned := content[:beginIdx] + content[endPos:]
-	cleaned = strings.TrimSpace(cleaned)
-
-	if cleaned == "" {
-		return os.Remove(path)
-	}
-	// Ensure parent dir exists (should already, but be safe).
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create parent dir: %w", err)
-	}
-	return os.WriteFile(path, []byte(cleaned+"\n"), 0o644)
-}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
