@@ -3,3 +3,7 @@ build/
 .worktrail/
 /worktrail
 cmd/worktrail/worktrail
+
+# SQLite journals
+*.db-wal
+*.db-shm
