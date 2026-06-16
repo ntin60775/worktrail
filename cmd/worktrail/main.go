@@ -56,6 +56,8 @@ func main() {
 		result, err = handleArchive(args)
 	case "install":
 		result, err = handleInstall(args)
+	case "uninstall":
+		result, err = handleUninstall(args)
 	case "doctor":
 		result, err = handleDoctor(args)
 	case "-h", "--help", "help":
@@ -699,7 +701,7 @@ func handleInstall(args []string) (interface{}, error) {
 	jsonFlag := f.Bool("json", false, "output as JSON")
 	dryRun := f.Bool("dry-run", false, "dry run")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail install [--dry-run] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail install [--dry-run] [--scan-root <path>] [--json]\n")
 	}
 	_ = f.Parse(args)
 
@@ -713,6 +715,29 @@ func handleInstall(args []string) (interface{}, error) {
 	fmt.Println(output)
 	return nil, nil
 }
+
+// ─── Uninstall ──────────────────────────────────────────────────────────────
+
+func handleUninstall(args []string) (interface{}, error) {
+	f := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	jsonFlag := f.Bool("json", false, "output as JSON")
+	dryRun := f.Bool("dry-run", false, "dry run")
+	f.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: worktrail uninstall [--dry-run] [--json]\n")
+	}
+	_ = f.Parse(args)
+
+	output, err := install.Uninstall(*dryRun)
+	if err != nil {
+		return nil, err
+	}
+	if *jsonFlag {
+		return map[string]string{"output": output}, nil
+	}
+	fmt.Println(output)
+	return nil, nil
+}
+
 
 // ─── Doctor ─────────────────────────────────────────────────────────────────
 
@@ -769,9 +794,8 @@ commands:
   report --timesheet timesheet for employer
   archive tck        archive legacy TCK structure
   install            global install
+  uninstall          global uninstall
   doctor             diagnostics
-
-All commands support --json for machine-readable output.
 `)
 }
 

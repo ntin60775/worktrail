@@ -75,6 +75,27 @@ func Diagnose() (map[string]interface{}, error) {
 		allOk = false
 	}
 
+	// 8. Managed blocks in global agent rules
+	managedOk := true
+	for agent, path := range globalAgentPaths() {
+		ok, _ := checkManagedBlock(path)
+		report["managed_block_"+agent] = ok
+		if !ok {
+			managedOk = false
+		}
+	}
+	report["managed_blocks_ok"] = managedOk
+	if !managedOk {
+		allOk = false
+	}
+
+	// 9. TCK conflict (should NOT be present after worktrail install)
+	tckConflict := checkTCKConflict()
+	report["tck_conflict"] = tckConflict
+	if tckConflict {
+		allOk = false
+	}
+
 	report["all_ok"] = allOk
 	return report, nil
 }
@@ -156,4 +177,35 @@ func checkBinaryInstalled() (bool, string) {
 		return false, binPath
 	}
 	return info.Mode()&0111 != 0, binPath
+}
+
+// ─── Managed block / TCK helpers ────────────────────────────────────────
+
+const worktrailMarker = "⟦⟦BEGIN_WORKTRAIL#WT01⟧⟧"
+
+func globalAgentPaths() map[string]string {
+	home, _ := os.UserHomeDir()
+	return map[string]string{
+		"omp":      filepath.Join(home, ".agents", "AGENTS.md"),
+		"pi":       filepath.Join(home, ".pi", "agent", "AGENTS.md"),
+		"opencode": filepath.Join(home, ".opencode", "AGENTS.md"),
+	}
+}
+
+func checkManagedBlock(path string) (bool, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, ""
+	}
+	if strings.Contains(string(data), worktrailMarker) {
+		return true, path
+	}
+	return false, path
+}
+
+func checkTCKConflict() bool {
+	home, _ := os.UserHomeDir()
+	tckDir := filepath.Join(home, ".agents", "skills", "task-centric-knowledge")
+	fi, err := os.Stat(tckDir)
+	return err == nil && fi.IsDir()
 }

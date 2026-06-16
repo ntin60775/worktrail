@@ -1,5 +1,22 @@
 # Changelog
 
+
+## [Unreleased] — 2026-06-16
+
+### Added
+- **TCK conflict resolution** (`install` step 0): detects and removes globally installed
+  `task-centric-knowledge` skill, plus cleans TCK managed blocks from all project
+  `AGENTS.md` files found under `~/dev/`.
+- **Managed block injection** (`install` step 2b): injects `agents.md.block` into global
+  agent rules for OMP (`~/.agents/AGENTS.md`), Pi (`~/.pi/agent/AGENTS.md`), and
+  OpenCode (`~/.opencode/AGENTS.md`). Idempotent — repeat installs update the block,
+  never duplicate.
+- **`worktrail uninstall`**: removes hooks config, skill directory, binary, and managed
+  blocks from all three agent global rules. Supports `--dry-run`.
+- **Doctor managed-block checks**: `worktrail doctor` now reports managed block presence
+  for each agent (`managed_block_omp`, `managed_block_pi`, `managed_block_opencode`)
+  and TCK conflict status (`tck_conflict`).
+
 ## [0.2.0] — Unreleased
 
 ### Added
