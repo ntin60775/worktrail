@@ -392,7 +392,7 @@ func cleanTCKBlock(path string) error {
 func globalAgentPaths() map[string]string {
 	home, _ := os.UserHomeDir()
 	return map[string]string{
-		"omp":      filepath.Join(home, ".agents", "AGENTS.md"),
+		"omp":      filepath.Join(home, ".omp", "agent", "AGENTS.md"),
 		"pi":       filepath.Join(home, ".pi", "agent", "AGENTS.md"),
 		"opencode": filepath.Join(home, ".opencode", "AGENTS.md"),
 	}
