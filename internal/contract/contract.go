@@ -58,7 +58,7 @@ func ValidateTransition(oldStatus, newStatus string) error {
 }
 
 // Init creates a new contract for the given task.
-func Init(taskID, name, scope string) (*types.Contract, error) {
+func Init(taskID, name, scope string, relatesTo []string) (*types.Contract, error) {
 	// Check if contract already exists via tag
 	tags, err := gitnotes.ListTags()
 	if err != nil {
@@ -99,6 +99,7 @@ func Init(taskID, name, scope string) (*types.Contract, error) {
 		CreatedAt: now,
 		UpdatedAt: now,
 		Branch:    branch,
+		RelatesTo: relatesTo,
 	}
 
 	note := &types.TaskNote{Contract: &contract}
@@ -133,7 +134,7 @@ func Show(taskID string) (*types.Contract, error) {
 }
 
 // Update modifies an existing contract's fields.
-func Update(taskID string, updates map[string]string, criteriaFile, verifyFile string) (*types.Contract, error) {
+func Update(taskID string, updates map[string]string, criteriaFile, verifyFile string, relatesTo []string) (*types.Contract, error) {
 	note, anchor, err := gitnotes.ReadByTask(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("read task %s: %w", taskID, err)
@@ -188,6 +189,10 @@ func Update(taskID string, updates map[string]string, criteriaFile, verifyFile s
 		c.Verification = methods
 	}
 
+
+	if relatesTo != nil {
+		c.RelatesTo = relatesTo
+	}
 	c.UpdatedAt = time.Now()
 
 	note.Contract = c

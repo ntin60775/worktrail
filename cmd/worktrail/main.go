@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"worktrail/internal/archive"
@@ -15,6 +17,7 @@ import (
 	"worktrail/internal/doctor"
 	"worktrail/internal/executor"
 	"worktrail/internal/install"
+	"worktrail/internal/index"
 	"worktrail/internal/list"
 	"worktrail/internal/report"
 	wt "worktrail/internal/time"
@@ -50,6 +53,8 @@ func main() {
 		result, err = handleProgress(args)
 	case "finalize":
 		result, err = handleFinalize(args)
+	case "index":
+		result, err = handleIndex(args)
 	case "report":
 		result, err = handleReport(args)
 	case "archive":
@@ -156,8 +161,10 @@ func handleContractInit(args []string) (interface{}, error) {
 	taskID := f.String("task-id", "", "task identifier (required)")
 	name := f.String("name", "", "contract name (required)")
 	scope := f.String("scope", "", "task scope (optional)")
+	var relatesTo stringSliceFlag
+	f.Var(&relatesTo, "relates-to", "related task IDs (repeatable)")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail contract init --task-id <id> --name \"...\" [--scope \"...\"] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail contract init --task-id <id> --name \"...\" [--scope \"...\"] [--relates-to <id>] [--json]\n")
 	}
 	_ = f.Parse(args)
 
@@ -166,7 +173,7 @@ func handleContractInit(args []string) (interface{}, error) {
 		os.Exit(1)
 	}
 
-	c, err := contract.Init(*taskID, *name, *scope)
+	c, err := contract.Init(*taskID, *name, *scope, relatesTo.slice())
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +214,10 @@ func handleContractUpdate(args []string) (interface{}, error) {
 
 	criteriaFile := f.String("criteria-file", "", "path to JSON file with success criteria")
 	verifyFile := f.String("verify-file", "", "path to JSON file with verification methods")
+	var relatesTo stringSliceFlag
+	f.Var(&relatesTo, "relates-to", "related task IDs (repeatable)")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail contract update --task-id <id> [--set <key=value>] [--criteria-file <path>] [--verify-file <path>] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail contract update --task-id <id> [--set <key=value>] [--relates-to <id>] [--criteria-file <path>] [--verify-file <path>] [--json]\n")
 	}
 	_ = f.Parse(args)
 
@@ -218,7 +227,7 @@ func handleContractUpdate(args []string) (interface{}, error) {
 	}
 
 	updates := make(map[string]string)
-	for _, s := range sets {
+	for _, s := range sets.values {
 		parts := strings.SplitN(s, "=", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid --set value %q: expected key=value", s)
@@ -226,7 +235,12 @@ func handleContractUpdate(args []string) (interface{}, error) {
 		updates[parts[0]] = parts[1]
 	}
 
-	c, err := contract.Update(*taskID, updates, *criteriaFile, *verifyFile)
+	var rt []string
+	if relatesTo.seen {
+		rt = relatesTo.slice()
+	}
+
+	c, err := contract.Update(*taskID, updates, *criteriaFile, *verifyFile, rt)
 	if err != nil {
 		return nil, err
 	}
@@ -289,17 +303,25 @@ func handleDecisionRecord(args []string) (interface{}, error) {
 	id := f.String("id", "", "decision id")
 	title := f.String("title", "", "title")
 	rationale := f.String("rationale", "", "rationale")
+	resource := f.String("resource", "", "resource URI (preferred)")
 	file := f.String("file", "", "file path")
 	lines := f.String("lines", "", "line range")
 	alternatives := f.String("alternatives", "", "alternatives semicolon-separated")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail decision record --task-id <id> --id <did> --title \"...\" --rationale \"...\" [--file <path>] [--lines <range>] [--alternatives \"alt1; alt2\"] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail decision record --task-id <id> --id <did> --title \"...\" --rationale \"...\" [--resource <uri> | --file <path>] [--lines <range>] [--alternatives \"alt1; alt2\"] [--json]\n")
 	}
 	_ = f.Parse(args)
 
 	if *taskID == "" || *id == "" || *title == "" || *rationale == "" {
 		f.Usage()
 		os.Exit(1)
+	}
+
+	if *resource != "" && *file != "" {
+		return nil, fmt.Errorf("--resource and --file are mutually exclusive")
+	}
+	if *resource != "" {
+		*file = *resource
 	}
 
 	var alts []string
@@ -398,16 +420,24 @@ func handleSpecRecord(args []string) (interface{}, error) {
 	id := f.String("id", "", "spec id")
 	scope := f.String("scope", "", "scope")
 	invariants := f.String("invariants", "", "invariants semicolon-separated")
+	resource := f.String("resource", "", "resource URI (preferred)")
 	file := f.String("file", "", "file path")
 	lines := f.String("lines", "", "line range")
 	f.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: worktrail spec record --task-id <id> --id <sid> --scope \"...\" --invariants \"инв1; инв2; ...\" [--file <path>] [--lines <range>] [--json]\n")
+		fmt.Fprint(os.Stderr, "usage: worktrail spec record --task-id <id> --id <sid> --scope \"...\" --invariants \"инв1; инв2; ...\" [--resource <uri> | --file <path>] [--lines <range>] [--json]\n")
 	}
 	_ = f.Parse(args)
 
 	if *taskID == "" || *id == "" || *scope == "" || *invariants == "" {
 		f.Usage()
 		os.Exit(1)
+	}
+
+	if *resource != "" && *file != "" {
+		return nil, fmt.Errorf("--resource and --file are mutually exclusive")
+	}
+	if *resource != "" {
+		*file = *resource
 	}
 
 	var invs []string
@@ -659,6 +689,47 @@ func handleReport(args []string) (interface{}, error) {
 	return nil, nil
 }
 
+// ─── Index ───────────────────────────────────────────────────────────────────
+
+func handleIndex(args []string) (interface{}, error) {
+	f := flag.NewFlagSet("index", flag.ContinueOnError)
+	jsonFlag := f.Bool("json", false, "output as JSON")
+	save := f.Bool("save", false, "save TASKS.md to repo root")
+	f.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: worktrail index [--save] [--json]\n")
+	}
+	_ = f.Parse(args)
+
+	md, err := index.BuildIndex()
+	if err != nil {
+		return nil, err
+	}
+	if *save {
+		root, err := gitTopLevel()
+		if err != nil {
+			return nil, fmt.Errorf("not in a git repository: %w", err)
+		}
+		indexPath := filepath.Join(root, "TASKS.md")
+		if err := os.WriteFile(indexPath, []byte(md), 0644); err != nil {
+			return nil, fmt.Errorf("save index: %w", err)
+		}
+		fmt.Printf("Index saved to %s\n", indexPath)
+	}
+	if *jsonFlag {
+		return map[string]string{"index": md}, nil
+	}
+	fmt.Print(md)
+	return nil, nil
+}
+
+func gitTopLevel() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // ─── Archive ────────────────────────────────────────────────────────────────
 
 func handleArchive(args []string) (interface{}, error) {
@@ -763,13 +834,19 @@ func handleDoctor(args []string) (interface{}, error) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-type stringSliceFlag []string
+type stringSliceFlag struct {
+	values []string
+	seen   bool
+}
 
-func (s *stringSliceFlag) String() string { return strings.Join(*s, ", ") }
+func (s *stringSliceFlag) String() string { return strings.Join(s.values, ", ") }
 func (s *stringSliceFlag) Set(v string) error {
-	*s = append(*s, v)
+	s.values = append(s.values, v)
+	s.seen = true
 	return nil
 }
+
+func (s *stringSliceFlag) slice() []string { return s.values }
 
 func usage() {
 	fmt.Fprint(os.Stderr, `worktrail v2 — git-embedded task knowledge system
@@ -790,6 +867,7 @@ commands:
   progress list      list progress entries for a task
   finalize           finalize a task (status → done)
   time               derive work duration
+  index              generate TASKS.md task index
   report             generate markdown report
   report --timesheet timesheet for employer
   archive tck        archive legacy TCK structure
@@ -846,6 +924,9 @@ func printContract(c *types.Contract) {
 	}
 	if c.Branch != "" {
 		fmt.Printf("Branch:     %s\n", c.Branch)
+	}
+	if len(c.RelatesTo) > 0 {
+		fmt.Printf("Related:    %s\n", strings.Join(c.RelatesTo, ", "))
 	}
 	if len(c.SuccessCriteria) > 0 {
 		fmt.Println("\nSuccess criteria:")

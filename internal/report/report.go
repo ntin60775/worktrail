@@ -110,6 +110,15 @@ func BuildReport(taskID string) (string, error) {
 		fmt.Fprintf(&b, "\n")
 	}
 
+	// Related tasks
+	if len(c.RelatesTo) > 0 {
+		fmt.Fprintf(&b, "### Related Tasks\n\n")
+		for _, rid := range c.RelatesTo {
+			fmt.Fprintf(&b, "- %s\n", rid)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
 	// Progress timeline
 	if len(note.Progress) > 0 {
 		fmt.Fprintf(&b, "## Progress Timeline\n\n")

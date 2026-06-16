@@ -17,6 +17,7 @@ type Contract struct {
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at,omitempty"`
 	Branch          string               `json:"branch,omitempty"`
+	RelatesTo       []string             `json:"relates_to,omitempty"`
 	SuccessCriteria []SuccessCriterion   `json:"success_criteria,omitempty"`
 	Verification    []VerificationMethod `json:"verification,omitempty"`
 }
